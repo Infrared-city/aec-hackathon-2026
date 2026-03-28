@@ -1,0 +1,1 @@
+uv run panel serve frontend/cityagent_app.py

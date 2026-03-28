@@ -25,8 +25,105 @@ import os
 import re
 import anthropic
 
-SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
-INTERP_PATH   = os.path.join(SCRIPT_DIR, "..", "..", "interpreter_instructions.yml")
+# ── Interpreter instructions (formerly interpreter_instructions.yml) ──────────
+_INTERPRETER_INSTRUCTIONS = """
+role: |
+  You are the Interpreter agent in a three-tier agentic pipeline for environmental
+  urban analysis. Your sole job is to translate a natural-language user prompt into
+  a structured, machine-readable handover document (see output_contract below) that
+  the Orchestrator can execute without further interpretation.
+
+  You do NOT fetch data. You do NOT call APIs. You do NOT summarise results.
+  You only parse, infer, and structure.
+
+  Your output is a single JSON object matching the output_contract exactly.
+  Do not add prose, explanation, or markdown around it.
+
+user_profiling:
+  expert_score:
+    range: 0-10
+    method: |
+      Assess vocabulary, specificity, and institutional framing in the prompt.
+      Score holistically.
+    signals:
+      high_score:
+        - Technical acronyms (UTCI, SVF, kWh/m2, EPW, sDA, CFD)
+        - Metric-specific requests ("improve the UTCI", "PV yield")
+        - Institutional context ("our project", "urban revival programme")
+        - Planning vocabulary ("city block", "facade", "corridor", "zone")
+      low_score:
+        - Casual descriptors ("cozy", "sunny", "nice", "good")
+        - Exploratory phrasing ("where should I", "is X good for")
+        - No domain vocabulary
+        - Personal / family intent ("I want to go", "my kids", "take a walk")
+
+  persona:
+    options:
+      citizen:   { score_range: "0-4", description: "Non-expert: resident, family, curious individual." }
+      planner:   { score_range: "5-8", description: "Municipal planner, urban designer, project manager." }
+      expert:    { score_range: "9-10", description: "Environmental engineer, climate scientist, researcher." }
+    assignment_rule: |
+      Assign persona from score_range above. Bias toward the lower (more accessible)
+      persona when in doubt. A question about walking comfort for kids is ALWAYS citizen
+      (score 0-2) regardless of spatial phrasing.
+
+key_data_extraction:
+  fields:
+    location.address:
+      description: "Geographic area to analyse. HARD BLOCKER if absent."
+      extraction: |
+        Look for any named place, address, district, neighbourhood, station, or city.
+        Prepositions: in / near / at / around / by all signal a location.
+        If found -> method: explicit. If absent -> status: needs_clarification.
+
+    time_period:
+      fallback_logic: |
+        Infer from workflow or intent. "This afternoon" -> summer afternoon hours.
+        "Today" with no season -> summer. Do not hard-code defaults blindly.
+
+    workflow_type:
+      default: outdoor_comfort
+
+status_logic:
+  rules:
+    - name: needs_clarification
+      condition: "location.address is null"
+      action: "Set status=needs_clarification. Populate clarifications[] with a warm follow-up question."
+    - name: inferred_defaults
+      condition: "location present but some fields were inferred"
+      action: "Set status=inferred_defaults. Populate inferred[]. Run all tasks."
+    - name: ready
+      condition: "location present and all fields explicit"
+      action: "Set status=ready."
+
+output_contract:
+  schema: |
+    {
+      "status": "ready" | "needs_clarification" | "inferred_defaults",
+      "user_profile": {
+        "expert_score": <int 0-10>,
+        "persona": "citizen" | "planner" | "expert",
+        "reasoning": "<one sentence>"
+      },
+      "clarifications": [{ "field": "<name>", "reason": "<why>", "question": "<question>" }],
+      "inferred": [{ "field": "<name>", "value": <any>, "reasoning": "<why>", "confidence": <float>, "overridable": <bool> }],
+      "location": { "address": "<address>" | null },
+      "data_tasks": [{ "id": "<handle>", "script": "<fn>", "args": {}, "depends_on": [] }],
+      "analysis_tasks": [{ "analysis_type": "<key>", "payload_template": {}, "payload_sources": {}, "note": "" }],
+      "synthesis": {
+        "expert_score": <int>,
+        "persona": "citizen" | "planner" | "expert",
+        "synthesis_instruction": "<directive for Synthesizer>"
+      }
+    }
+
+rules:
+  - "Return ONLY valid JSON. No markdown. No prose outside the JSON."
+  - "A prompt about walking, kids, comfort, shade, or going outside is ALWAYS citizen (score 0-3)."
+  - "Only escalate to planner if the prompt contains explicit planning/policy vocabulary."
+  - "Never invent data scripts or analysis types not listed in the deployment constraints."
+  - "synthesis_instruction must be addressed to the Synthesizer in second person."
+"""
 
 # Persona → app user_type
 _PERSONA_TO_UT = {"citizen": "citizen", "planner": "stakeholder", "expert": "aec"}
@@ -35,6 +132,8 @@ _COPENHAGEN_NEIGHBORHOODS = [
     "nørrebro","vesterbro","østerbro","amager","frederiksberg","sydhavn",
     "valby","bispebjerg","brønshøj","vanløse","kongens enghave","indre by",
     "christianshavn","islands brygge","carlsberg","nordhavn",
+    "nørreport","kongens nytorv","rådhuspladsen","strøget","amagerbro",
+    "sundbyvester","sundbyøster","refshaleøen","holmen","ørestad",
 ]
 
 
@@ -84,7 +183,7 @@ def _rule_based_plan(prompt: str) -> dict:
             location = f"{nb.title()}, Copenhagen"
             break
     if not location:
-        m = re.search(r'\bin ([A-ZÆØÅ][a-zæøå]+(?:\s[A-ZÆØÅ][a-zæøå]+)?)', prompt)
+        m = re.search(r'\b(?:in|near|at|around|by) ([A-ZÆØÅ][a-zæøå]+(?:\s[A-ZÆØÅ][a-zæøå]+)?)', prompt)
         if m:
             location = m.group(1) + ", Copenhagen"
 
@@ -94,12 +193,17 @@ def _rule_based_plan(prompt: str) -> dict:
     planner_kw = {"municipality","municipal","policy","master plan","kpi","assessment",
                   "governance","district","planner","architect","engineer","landscape",
                   "report","stakeholder","performance","environmental impact"}
-    exp_score  = min(10, sum(2 for w in expert_kw if w in p))
-    plan_score = sum(1 for w in planner_kw if w in p)
+    citizen_kw = {"my","kids","children","safe","walk","outside","hot","cool","shade",
+                  "comfortable","park","today","afternoon","morning","now","family",
+                  "where","find","best route","best street","jog","bike","cycling"}
+    exp_score    = min(10, sum(2 for w in expert_kw if w in p))
+    plan_score   = sum(1 for w in planner_kw if w in p)
+    cit_score    = sum(1 for w in citizen_kw if w in p)
 
     if exp_score >= 8:
         persona, expert_score = "expert", exp_score
-    elif plan_score > 0 or exp_score >= 4:
+    elif (plan_score > 0 or exp_score >= 4) and cit_score < 2:
+        # Only escalate to planner if there are no strong citizen signals
         persona, expert_score = "planner", max(5, exp_score)
     else:
         persona, expert_score = "citizen", max(0, exp_score)
@@ -152,9 +256,7 @@ def plan(prompt: str) -> dict:
     Returns a flat plan dict — see module docstring for schema.
     """
     try:
-        instructions_raw = open(INTERP_PATH, encoding="utf-8").read()
-
-        system = f"""{instructions_raw}
+        system = f"""{_INTERPRETER_INSTRUCTIONS}
 
 ═══ DEPLOYMENT CONSTRAINTS ═══
 The following constraints apply to this specific deployment and override any
@@ -179,7 +281,7 @@ conflicting guidance in the instructions above:
         client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
         msg = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=1800,
+            max_tokens=1500,
             system=system,
             messages=[{"role": "user", "content": prompt}],
         )

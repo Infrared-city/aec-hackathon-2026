@@ -249,13 +249,19 @@ def run_pipeline():
         # Guard: if keyword detection clearly reads as citizen AND the LLM's
         # expert_score is low (< 4), trust the keyword detection.
         exp_score = int(plan_data.get("expert_score", 0))
-        if state.detected_type == "citizen" and ut == "stakeholder" and exp_score < 4:
+        # Guard: trust keyword detection when LLM misroutes personas
+        if state.detected_type == "citizen" and ut == "stakeholder" and exp_score < 6:
             ut = "citizen"
+        if state.detected_type == "aec" and ut != "aec":
+            # AEC keywords (UTCI, baseline, simulation…) are unambiguous — always trust them
+            ut = "aec"
 
-        persona               = plan_data.get("persona", _PERSONA_TO_UT.get(ut,"citizen"))
+        persona = plan_data.get("persona", _PERSONA_TO_UT.get(ut, "citizen"))
         # Re-align persona with the resolved user_type
         if ut == "citizen":
             persona = "citizen"
+        elif ut == "aec":
+            persona = "expert"
         synthesis_instruction = plan_data.get("synthesis_instruction", "")
         season_str            = plan_data.get("season", "summer")
         sm, em, sh, eh        = SEASON_MONTHS.get(season_str, SEASON_MONTHS["summer"])
@@ -293,11 +299,19 @@ def run_pipeline():
         _s(status_idx=2, status_pct=25)
         weather = get_weather_data(EPW_PATH, start_month=sm, end_month=em,
                                    start_hour=sh, end_hour=eh)
+        # call_infrared unpacks 4 values from month-stamp; patch in the hours
+        weather["month-stamp"] = [sm, em, sh, eh]
 
         # Steps 3-4 — simulations
-        tci_cache = os.path.join(GRID_CACHE, "tci.npy")
-        sr_cache  = os.path.join(GRID_CACHE, "sr.npy")
-        use_grid  = os.path.exists(tci_cache) and os.path.exists(sr_cache)
+        tci_cache  = os.path.join(GRID_CACHE, "tci.npy")
+        sr_cache   = os.path.join(GRID_CACHE, "sr.npy")
+        grid_meta  = os.path.join(GRID_CACHE, "grid_meta.json")
+        use_grid   = False
+        if os.path.exists(tci_cache) and os.path.exists(sr_cache) and os.path.exists(grid_meta):
+            gm = json.load(open(grid_meta))
+            gdist = math.hypot((lat - gm["lat"]) * 111320,
+                               (lon - gm["lon"]) * 111320 * math.cos(math.radians(lat)))
+            use_grid = gdist < 10   # reuse only if within 10 m of cached center
 
         _s(status_idx=3, status_pct=38)
         if use_grid:
@@ -315,6 +329,7 @@ def run_pipeline():
             raw = call_infrared("solar-radiation", lat, lon, buildings, weather)
             sr  = np.array(raw["output"], dtype=float).reshape((512,512), order="F")
             np.save(sr_cache, sr)
+            json.dump({"lat": lat, "lon": lon}, open(grid_meta, "w"))
         _s(sr_grid=sr)
 
         # Step 5 — statistics
@@ -370,135 +385,170 @@ def run_pipeline():
 @pn.depends(state.param.active_sim, state.param.tci_grid, state.param.sr_grid,
             state.param.user_type, state.param.lat, state.param.lon, state.param.walk_mode)
 def _map_pane(active_sim, tci_grid, sr_grid, user_type, lat, lon, walk_mode):
-    ld = 256/111320
-    lo = 256/(111320*math.cos(math.radians(lat)))
-    bounds = (lon-lo, lat-ld, lon+lo, lat+ld)
-    base_opts = dict(width=600, height=500, xaxis=None, yaxis=None)
-    tiles = gvts.CartoLight().opts(**base_opts)
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.cm as mcm
+    import matplotlib.colors as mcolors
+    import matplotlib.pyplot as _mplt
 
-    # ── Citizen: 3-zone categorical comfort map — NO scientific colorbar ───────
-    if user_type == "citizen":
-        if tci_grid is None:
-            return pn.pane.HoloViews(tiles, sizing_mode="stretch_both")
+    ld = 256 / 111320
+    lo = 256 / (111320 * math.cos(math.radians(lat)))
+    south, west = lat - ld, lon - lo
+    north, east = lat + ld, lon + lo
+    bounds_js   = f"[[{south},{west}],[{north},{east}]]"
 
-        # Comfort categories: 0=comfortable, 1=warm, 2=hot
-        cat = np.where(tci_grid < 26, 0.0,
-              np.where(tci_grid < 32, 1.0, 2.0)).astype(float)
+    _MID = abs(hash((lat, lon, user_type, walk_mode, active_sim,
+                     tci_grid is not None, sr_grid is not None)))
+    map_id = f"lm{_MID}"
+
+    def _base(extra=""):
+        # Leaflet scripts are blocked when injected via Bokeh's innerHTML.
+        # Use an iframe with srcdoc — fresh document context, scripts execute normally.
+        inner = (
+            '<!DOCTYPE html><html><head><meta charset="utf-8">'
+            '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">'
+            '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>'
+            '<style>*{margin:0;padding:0}html,body,#' + map_id + '{width:100%;height:100%;overflow:hidden}</style>'
+            '</head><body><div id="' + map_id + '"></div><script>'
+            'window.addEventListener("load",function(){'
+            'var m=L.map("' + map_id + '",{zoomControl:true,attributionControl:false});'
+            'L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",'
+            '{maxZoom:19,subdomains:"abcd"}).addTo(m);'
+            'm.fitBounds(' + bounds_js + ');'
+            + extra +
+            '});</script></body></html>'
+        )
+        srcdoc = inner.replace('&', '&amp;').replace('"', '&quot;')
+        return f'<iframe srcdoc="{srcdoc}" style="width:100%;height:calc(100vh - 54px);min-height:480px;border:none;display:block"></iframe>'
+
+    def _grid_png(rgba):
+        """float RGBA (H,W,4) → base64 PNG data-URL"""
+        buf = io.BytesIO()
+        _mplt.imsave(buf, np.clip(rgba, 0, 1), format="png")
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+    def _cont_rgba(grid, cmap_name, vmin, vmax, alpha=0.60):
+        norm = mcolors.Normalize(vmin=vmin, vmax=vmax, clip=True)
+        rgba = mcm.get_cmap(cmap_name)(norm(np.where(np.isnan(grid), vmin, grid)))
+        rgba = rgba.copy()
+        rgba[np.isnan(grid)] = 0
+        rgba[:, :, 3] = np.where(np.isnan(grid), 0, alpha)
+        return rgba
+
+    def _legend(title, grad, lo_lbl, hi_lbl, pos="bottomright"):
+        return f"""
+    var _lg=L.control({{position:'{pos}'}});
+    _lg.onAdd=function(){{
+      var d=L.DomUtil.create('div');
+      d.style='background:rgba(255,255,255,0.92);padding:6px 10px;border-radius:5px;'
+             +'font:11px/1.4 sans-serif;min-width:140px;box-shadow:0 1px 5px rgba(0,0,0,.15)';
+      d.innerHTML='<b>{title}</b>'
+        +'<div style="height:9px;background:{grad};margin:4px 0;border-radius:2px"></div>'
+        +'<div style="display:flex;justify-content:space-between"><span>{lo_lbl}</span><span>{hi_lbl}</span></div>';
+      return d;
+    }};
+    _lg.addTo(m);"""
+
+    # ── No data yet: plain basemap ─────────────────────────────────────────────
+    if tci_grid is None and sr_grid is None:
+        return pn.pane.HTML(_base(), sizing_mode="stretch_width")
+
+    # ── Citizen walk mode: real-road route via OSRM ───────────────────────────
+    if user_type == "citizen" and walk_mode and tci_grid is not None:
+        # Place start ~160 m north, end ~160 m south of tile centre
+        s_lat = round(lat + ld * 0.70, 6)
+        s_lon = round(lon, 6)
+        e_lat = round(lat - ld * 0.70, 6)
+        e_lon = round(lon, 6)
+        osrm  = (f"https://router.project-osrm.org/route/v1/foot/"
+                 f"{s_lon},{s_lat};{e_lon},{e_lat}"
+                 f"?overview=full&geometries=geojson")
+        extra = (
+            f"fetch('{osrm}')"
+            ".then(function(r){return r.json();})"
+            ".then(function(d){"
+            "if(!d.routes||!d.routes[0])return;"
+            "var c=d.routes[0].geometry.coordinates.map(function(p){return[p[1],p[0]];});"
+            "L.polyline(c,{color:'#2a6ea8',weight:5,opacity:0.92,lineJoin:'round'}).addTo(m);"
+            "L.circleMarker(c[0],{radius:9,color:'#fff',weight:2,fillColor:'#1c4a8a',fillOpacity:1})"
+            ".bindTooltip('Start').addTo(m);"
+            "L.circleMarker(c[c.length-1],{radius:9,color:'#fff',weight:2,fillColor:'#2a8a5a',fillOpacity:1})"
+            ".bindTooltip('End').addTo(m);"
+            "m.fitBounds(L.latLngBounds(c).pad(0.15));"
+            "}).catch(function(){});"
+        )
+        return pn.pane.HTML(_base(extra), sizing_mode="stretch_width")
+
+    # ── Citizen comfort map: 3-zone categorical overlay ────────────────────────
+    if user_type == "citizen" and tci_grid is not None:
+        cat  = np.where(tci_grid < 26, 0, np.where(tci_grid < 32, 1, 2)).astype(float)
         cat[np.isnan(tci_grid)] = np.nan
+        rgba = np.zeros((*cat.shape, 4), dtype=float)
+        rgba[cat == 0] = [74/255, 144/255, 80/255,  0.55]
+        rgba[cat == 1] = [232/255, 160/255, 32/255, 0.55]
+        rgba[cat == 2] = [192/255, 53/255,  42/255, 0.55]
+        url = _grid_png(rgba)
+        extra = f"""
+    L.imageOverlay('{url}',{bounds_js},{{opacity:1,interactive:false}}).addTo(m);
+    var _lg=L.control({{position:'bottomleft'}});
+    _lg.onAdd=function(){{
+      var d=L.DomUtil.create('div');
+      d.style='background:rgba(255,255,255,0.92);padding:6px 10px;border-radius:5px;'
+             +'font:11px/1.6 sans-serif;box-shadow:0 1px 5px rgba(0,0,0,.15)';
+      d.innerHTML='<b>Comfort</b><br>'
+        +'<span style="color:#4a9050">&#9632;</span> Comfortable (&lt;26\u00b0C)<br>'
+        +'<span style="color:#e8a020">&#9632;</span> Warm (26\u201332\u00b0C)<br>'
+        +'<span style="color:#c0352a">&#9632;</span> Hot (&gt;32\u00b0C)';
+      return d;
+    }};
+    _lg.addTo(m);"""
+        return pn.pane.HTML(_base(extra), sizing_mode="stretch_width")
 
-        if walk_mode:
-            # Compute coolest S→N corridor as a proper vector line in Web Mercator.
-            # Convert lat/lon route coords → EPSG:3857 so gv.Path aligns with
-            # CartoLight tiles (which are also Web Mercator).
-            from scipy.ndimage import gaussian_filter
-            from pyproj import Transformer
-            _to_merc = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
-
-            # Fill NaN (buildings) with penalty, smooth to find cool corridors
-            nan_mask = np.isnan(tci_grid)
-            penalty  = float(np.nanpercentile(tci_grid, 90)) if (~nan_mask).any() else 40.0
-            tci_sm   = gaussian_filter(np.where(nan_mask, penalty, tci_grid), sigma=18)
-
-            n_pts      = 40
-            rows_s     = np.linspace(8, 503, n_pts, dtype=int)
-            route_cols = []
-            prev_col   = 256
-            for r in rows_s:
-                w0, w1   = max(0, prev_col - 80), min(512, prev_col + 80)
-                best_col = w0 + int(np.argmin(tci_sm[r, w0:w1]))
-                prev_col = best_col
-                route_cols.append(best_col)
-
-            k      = np.ones(13) / 13
-            cols_s = np.clip(np.convolve(route_cols, k, mode="same").astype(int), 4, 507)
-
-            # Grid → lat/lon
-            # Pre-flipud grid: row 0 = north (lat+ld), row 511 = south (lat-ld)
-            r_lats = [lat + ld - (r / 511) * 2 * ld for r in rows_s]
-            r_lons = [lon - lo + (c / 511) * 2 * lo for c in cols_s]
-
-            # Lat/lon → Web Mercator (EPSG:3857) to match CartoLight CRS
-            rx, ry = _to_merc.transform(r_lons, r_lats)
-
-            route_path = gv.Path(
-                [np.column_stack([rx, ry])],
-                kdims=["x", "y"],
-            ).opts(color="#2a6ea8", line_width=4, alpha=0.88,
-                   xaxis=None, yaxis=None)
-
-            start_dot = gv.Points([(rx[0],  ry[0])],  kdims=["x", "y"]).opts(
-                color="#1c4a8a", size=13, marker="circle", xaxis=None, yaxis=None)
-            end_dot   = gv.Points([(rx[-1], ry[-1])], kdims=["x", "y"]).opts(
-                color="#2a8a5a", size=13, marker="circle", xaxis=None, yaxis=None)
-
-        # 3-zone colormap — same whether walk_mode or not (route is a vector overlay)
-        cmap, clim = ["#4a9050", "#e8a020", "#c0352a"], (0, 2)
-
-        img = gv.Image(np.flipud(cat), bounds=bounds,
-                       kdims=["Longitude","Latitude"], vdims=["comfort"]).opts(
-            cmap=cmap, clim=clim, alpha=0.55, colorbar=False,
-            tools=["hover"], **base_opts,
-        )
-        overlay = tiles * img
-        if walk_mode:
-            overlay = overlay * route_path * start_dot * end_dot
-        return pn.pane.HoloViews(overlay, sizing_mode="stretch_both")
-
-    # ── Stakeholder: TCI heatmap + priority zone (orange) ─────────────────────
+    # ── Stakeholder: TCI heatmap + priority zone ───────────────────────────────
     if user_type == "stakeholder":
-        grid = tci_grid if tci_grid is not None else sr_grid
-        if grid is None:
-            return pn.pane.HoloViews(tiles, sizing_mode="stretch_both")
-        valid = grid[~np.isnan(grid)]
-        vmin = float(np.percentile(valid, 2))  if valid.size else 0
-        vmax = float(np.percentile(valid, 98)) if valid.size else 1
-        img = gv.Image(np.flipud(tci_grid if tci_grid is not None else grid), bounds=bounds,
-                       kdims=["Longitude","Latitude"], vdims=["value"]).opts(
-            cmap="YlOrRd", alpha=0.55, clim=(vmin, vmax),
-            colorbar=True, colorbar_opts={"title": "\u00b0C UTCI \u2014 heat stress"},
-            tools=["hover"], **base_opts,
-        )
-        overlay = tiles * img
-        # Priority zone: top-30th-pct TCI ∩ SR combined
+        g     = tci_grid if tci_grid is not None else sr_grid
+        valid = g[~np.isnan(g)]
+        vmin  = float(np.percentile(valid, 2))  if valid.size else 0
+        vmax  = float(np.percentile(valid, 98)) if valid.size else 1
+        url   = _grid_png(_cont_rgba(g, "YlOrRd", vmin, vmax, 0.60))
+        extra = f"L.imageOverlay('{url}',{bounds_js},{{opacity:1,interactive:false}}).addTo(m);"
+
         if tci_grid is not None and sr_grid is not None:
-            tf = tci_grid.flatten(); sf = sr_grid.flatten()
-            mask = ~(np.isnan(tf) | np.isnan(sf))
-            if mask.sum() > 0:
-                tt = float(np.percentile(tf[mask], 70))
-                st = float(np.percentile(sf[mask], 70))
-                pz = np.where((tci_grid >= tt) & (sr_grid >= st), 1.0, np.nan)
-                pz_img = gv.Image(np.flipud(pz), bounds=bounds,
-                                  kdims=["Longitude","Latitude"], vdims=["pz"]).opts(
-                    cmap=["rgba(200,96,26,0.0)", "rgba(200,96,26,0.45)"],
-                    clim=(0, 1), alpha=1, colorbar=False, tools=[], **base_opts,
-                )
-                overlay = overlay * pz_img
-        return pn.pane.HoloViews(overlay, sizing_mode="stretch_both")
+            tf, sf = tci_grid.flatten(), sr_grid.flatten()
+            mk = ~(np.isnan(tf) | np.isnan(sf))
+            if mk.sum() > 0:
+                tt, st = float(np.percentile(tf[mk], 70)), float(np.percentile(sf[mk], 70))
+                pz     = np.where((tci_grid >= tt) & (sr_grid >= st), 1.0, np.nan)
+                pz_rgba = np.zeros((*pz.shape, 4), dtype=float)
+                pz_rgba[pz == 1.0] = [200/255, 96/255, 26/255, 0.45]
+                pz_url = _grid_png(pz_rgba)
+                extra += f"\nL.imageOverlay('{pz_url}',{bounds_js},{{opacity:1,interactive:false}}).addTo(m);"
 
-    # ── AEC: full technical raster, togglable TCI / SR ────────────────────────
+        extra += _legend("\u00b0C UTCI \u2014 heat stress",
+                         "linear-gradient(to right,#ffffb2,#fd8d3c,#bd0026)",
+                         f"{vmin:.0f}\u00b0C", f"{vmax:.0f}\u00b0C")
+        return pn.pane.HTML(_base(extra), sizing_mode="stretch_width")
+
+    # ── AEC: togglable TCI / SR heatmap ───────────────────────────────────────
     if active_sim == "SR":
-        grid   = sr_grid
-        cmap   = "YlOrBr"
-        clabel = "kWh/m\u00b2 \u2014 Solar irradiance"
+        g, cmap_n = sr_grid, "YlOrBr"
+        title, grad = "kWh/m\u00b2 \u2014 Solar irradiance", \
+                      "linear-gradient(to right,#ffffe5,#fe9929,#662506)"
     else:
-        grid   = tci_grid
-        cmap   = "YlOrRd"
-        clabel = "\u00b0C UTCI \u2014 Thermal comfort index"
+        g, cmap_n = tci_grid, "YlOrRd"
+        title, grad = "\u00b0C UTCI \u2014 Thermal comfort", \
+                      "linear-gradient(to right,#ffffb2,#fd8d3c,#bd0026)"
 
-    if grid is None:
-        return pn.pane.HoloViews(tiles, sizing_mode="stretch_both")
+    if g is None:
+        return pn.pane.HTML(_base(), sizing_mode="stretch_width")
 
-    valid = grid[~np.isnan(grid)]
-    vmin = float(np.percentile(valid, 2))  if valid.size else 0
-    vmax = float(np.percentile(valid, 98)) if valid.size else 1
-
-    img = gv.Image(np.flipud(grid), bounds=bounds,
-                   kdims=["Longitude","Latitude"], vdims=["value"]).opts(
-        cmap=cmap, alpha=0.60, clim=(vmin, vmax),
-        colorbar=True, colorbar_opts={"title": clabel},
-        tools=["hover"], **base_opts,
-    )
-    return pn.pane.HoloViews(tiles * img, sizing_mode="stretch_both")
+    valid = g[~np.isnan(g)]
+    vmin  = float(np.percentile(valid, 2))  if valid.size else 0
+    vmax  = float(np.percentile(valid, 98)) if valid.size else 1
+    url   = _grid_png(_cont_rgba(g, cmap_n, vmin, vmax, 0.65))
+    extra = (f"L.imageOverlay('{url}',{bounds_js},{{opacity:1,interactive:false}}).addTo(m);"
+             + _legend(title, grad, f"{vmin:.1f}", f"{vmax:.1f}"))
+    return pn.pane.HTML(_base(extra), sizing_mode="stretch_width")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PROMPT SCREEN
@@ -761,6 +811,36 @@ def _topbar():
         "stakeholder": "Environmental Performance Assessment",
         "aec":         "Technical Analysis Dashboard",
     }[ut]
+
+    # Persona override pills — same concept as forceUser() in cityRAG-v3.html
+    _PILL_CSS = lambda active, color, bg: (
+        f"display:inline-flex;align-items:center;gap:4px;padding:3px 9px;"
+        f"border-radius:999px;border:1px solid {color};font-family:'DM Mono',monospace;"
+        f"font-size:9px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;"
+        f"color:{color};background:{'rgba(0,0,0,0)' if not active else bg};"
+        f"font-weight:{'600' if active else '400'};"
+        f"transition:background .12s,font-weight .12s"
+    )
+    _PERSONAS = [
+        ("citizen",     "\U0001f6b6 Citizen",     "#2a6ea8", "rgba(42,110,168,0.12)"),
+        ("stakeholder", "\U0001f3db Stakeholder",  "#c8601a", "rgba(200,96,26,0.12)"),
+        ("aec",         "\U0001f4d0 AEC Expert",   "#2a8a5a", "rgba(42,138,90,0.12)"),
+    ]
+    pill_btns = []
+    for p_ut, p_lbl, p_col, p_bg in _PERSONAS:
+        active = (p_ut == ut)
+        btn = pn.widgets.Button(name=p_lbl, button_type="default", stylesheets=[f"""
+          :host button {{
+            {_PILL_CSS(active, p_col, p_bg)}
+          }}
+          :host button:hover {{ background:{p_bg}; }}
+        """])
+        def _switch(e, _p=p_ut):
+            state.user_type = _p
+            state.detected_type = _p
+        btn.on_click(_switch)
+        pill_btns.append(btn)
+
     new_btn = pn.widgets.Button(name="+ New analysis", button_type="default", stylesheets=["""
       :host button { background:var(--ink,#1c1a14);color:var(--bg,#f5f2ec);border:none;
         border-radius:7px;padding:6px 14px;font-family:'Instrument Sans',sans-serif;
@@ -775,13 +855,11 @@ def _topbar():
            "font-size":"1.1rem","font-weight":"200","letter-spacing":"-.02em"}),
         _h('<div style="width:1px;height:18px;background:var(--border2);margin:0 .5rem;align-self:center"></div>'
            f'<div style="font-size:12px;color:var(--muted);flex:1">{state.address_str} \u00b7 {subtitle}</div>'),
-        _h(f'<div style="display:flex;align-items:center;gap:.5rem;padding:4px 12px;border-radius:999px;'
-           f'border:1px solid {acc};font-family:\'DM Mono\',monospace;font-size:10px;font-weight:500;'
-           f'letter-spacing:.06em;text-transform:uppercase;color:{acc};background:{bg2}">{lbl}</div>'),
+        pn.Row(*pill_btns, styles={"gap":".35rem","align-items":"center"}),
         new_btn,
         height=52, sizing_mode="stretch_width",
         styles={"background":"var(--surface)","border-bottom":"1px solid rgba(60,55,40,.18)",
-                "padding":"0 1.4rem","align-items":"center","display":"flex","flex-shrink":"0"},
+                "padding":"0 1.4rem","align-items":"center","display":"flex","flex-shrink":"0","gap":".6rem"},
     )
 
 def _kpi_card(icon, name, val, unit, note, bar_pct, bar_color):
@@ -965,7 +1043,7 @@ function draw(){
   c.fillStyle='rgba(255,255,255,0.65)';c.font='9px monospace';c.textAlign='center';
   c.fillText('Suggested comfortable route',w/2,h-17);
 }
-window.addEventListener('load',draw);window.addEventListener('resize',draw);draw();
+window.addEventListener('resize',draw);setTimeout(draw,120);
 })();
 </script>
 """
@@ -1114,53 +1192,128 @@ def _build_aec():
     recs    = ai.get("recommendations", [])
     acc, bg2, bg3 = ACCENT["aec"]
 
-    # Radar — ecosystem services (baseline only)
-    axes = ['Thermal\nComfort','Solar\nReduction','Urban\nCooling',
-            'Carbon\nPotential','Wind\nMitigation','Human\nWellbeing']
-    N    = len(axes)
-    comf_n = max(0.0, min(1.0, (42-avg_tci)/16))
-    sol_n  = max(0.0, min(1.0, avg_sr/10))
-    cool_n = max(0.0, min(1.0, 1-pct_hot/100))
-    vals   = [comf_n*0.9, sol_n*0.8, cool_n*0.85, 0.25, 0.45, cool_n*0.75]
-    angs   = [n/N*2*np.pi for n in range(N)] + [0]
+    # ── Dual-scenario radar — matching cityRAG-v3.html design ─────────────────
+    # Axes match HTML: Biomass Density, Biodiversity, CO₂, Climate Regulation, Air Quality, Human Well-being
+    axes = ['Biomass\nDensity','Biodiversity\nAvailability','CO₂\nSequestration',
+            'Climate\nRegulation','Air\nQuality','Human\nWell-being']
+    N = len(axes)
+    comf_n = max(0.0, min(1.0, (42 - avg_tci) / 16))
+    sol_n  = max(0.0, min(1.0, avg_sr / 10))
+    cool_n = max(0.0, min(1.0, 1 - pct_hot / 100))
+    # Baseline: pre-tree state — low ecosystem service values derived from data
+    baseline = [
+        max(0.08, comf_n * 0.28),   # Biomass Density (no trees yet)
+        max(0.08, comf_n * 0.22),   # Biodiversity
+        max(0.08, comf_n * 0.18),   # CO₂ Sequestration
+        max(0.12, cool_n * 0.30),   # Climate Regulation
+        max(0.20, cool_n * 0.40),   # Air Quality
+        max(0.15, cool_n * 0.32),   # Human Well-being
+    ]
+    # Enhanced: after canopy intervention (HTML: roughly 3-4x baseline, capped at ~0.88)
+    boost = 0.50
+    enhanced = [min(0.92, b + boost + (0.10 * i % 0.08)) for i, b in enumerate(baseline)]
 
-    fig, ax = plt.subplots(figsize=(4.5, 2.8), subplot_kw=dict(polar=True), facecolor="#faf8f4")
+    angs = [n / N * 2 * np.pi for n in range(N)] + [0]
+    bv   = baseline  + [baseline[0]]
+    ev   = enhanced  + [enhanced[0]]
+
+    fig, ax = plt.subplots(figsize=(4.8, 3.2), subplot_kw=dict(polar=True), facecolor="#faf8f4")
     ax.set_facecolor("#faf8f4")
-    ax.set_ylim(0,1); ax.set_yticks([.25,.5,.75,1.0]); ax.set_yticklabels(["","","",""], fontsize=0)
+    ax.set_ylim(0, 1)
+    ax.set_yticks([.25, .5, .75, 1.0]); ax.set_yticklabels(["", "", "", ""], fontsize=0)
     ax.set_xticks(angs[:-1])
-    ax.set_xticklabels(axes, fontsize=10, color=(60/255, 55/255, 40/255, 0.65), fontfamily="monospace")
+    ax.set_xticklabels(axes, fontsize=9, color=(60/255, 55/255, 40/255, 0.65),
+                        fontfamily="monospace", linespacing=1.4)
     ax.spines['polar'].set_color((60/255, 55/255, 40/255, 0.15))
     ax.grid(color=(60/255, 55/255, 40/255, 0.10), linewidth=0.7)
-    bv = vals + [vals[0]]
-    ax.plot(angs, bv, color="#2a8a5a", linewidth=1.8)
-    ax.fill(angs, bv, alpha=0.22, color="#2a8a5a")
-    for a, v in zip(angs[:-1], vals): ax.plot(a, v, 'o', color="#2a8a5a", ms=4)
-    plt.tight_layout(pad=0.3)
+    # Baseline polygon
+    ax.plot(angs, bv, color="rgba(42,138,90,0.35)" if False else "#2a8a5a",
+            linewidth=1.0, linestyle="--", alpha=0.45)
+    ax.fill(angs, bv, alpha=0.10, color="#2a8a5a")
+    # Enhanced polygon
+    ax.plot(angs, ev, color="#2a8a5a", linewidth=1.8)
+    ax.fill(angs, ev, alpha=0.22, color="#2a8a5a")
+    for a, v in zip(angs[:-1], enhanced):
+        ax.plot(a, v, 'o', color="#2a8a5a", ms=4)
+    plt.tight_layout(pad=0.4)
     radar = pn.pane.Matplotlib(fig, tight=True, sizing_mode="stretch_width",
-                               styles={"background":"var(--surface)","padding":".5rem"})
+                               styles={"background":"var(--surface)", "padding": ".5rem"})
     plt.close(fig)
 
-    # Comparison bars
-    bars_html = "".join(
-        f'<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.7rem">'
-        f'<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;color:var(--muted);'
-        f'width:72px;flex-shrink:0;text-transform:uppercase;letter-spacing:.06em">{lbl}</div>'
-        f'<div style="flex:1">'
-        f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">'
-        f'<div style="height:8px;border-radius:4px;background:#c0352a;width:{int(bp*100)}%;min-width:2px"></div>'
-        f'<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;color:var(--muted)">{b_lbl}</div></div>'
-        f'<div style="display:flex;align-items:center;gap:6px">'
-        f'<div style="height:8px;border-radius:4px;background:#2a8a5a;width:{int(ep*100)}%;min-width:2px"></div>'
-        f'<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;color:var(--muted)">{e_lbl}</div></div>'
-        f'</div></div>'
-        for lbl,b_lbl,e_lbl,bp,ep in [
-            ("UTCI mean",  f"{avg_tci:.1f}\u00b0C baseline", f"{max(22,avg_tci-7.5):.1f}\u00b0C + trees",
-             min(1,avg_tci/45), min(1,max(22,avg_tci-7.5)/45)),
-            ("Solar Rad.", f"{avg_sr:.1f} kWh/m\u00b2 base", f"{avg_sr*0.45:.1f} kWh/m\u00b2 + trees",
-             min(1,avg_sr/10), min(1,avg_sr*0.45/10)),
-            ("Heat Stress",f"{pct_hot:.0f}% base",       f"{max(0,pct_hot-30):.0f}% + trees",
-             pct_hot/100, max(0,pct_hot-30)/100),
-        ]
+    legend_html = (
+        '<div style="display:flex;gap:1.2rem;padding:.3rem .6rem;font-family:\'DM Mono\',monospace;'
+        'font-size:9px;color:var(--muted)">'
+        '<span style="display:flex;align-items:center;gap:4px">'
+        '<svg width="22" height="6"><line x1="0" y1="3" x2="22" y2="3" stroke="#2a8a5a" '
+        'stroke-width="1.5" stroke-dasharray="4,3" opacity=".55"/></svg>Baseline (no trees)</span>'
+        '<span style="display:flex;align-items:center;gap:4px">'
+        '<svg width="22" height="6"><line x1="0" y1="3" x2="22" y2="3" stroke="#2a8a5a" '
+        'stroke-width="2"/></svg>+ Canopy intervention</span></div>'
+    )
+
+    # Technical distribution stats (needed by bars and header)
+    tci_p50 = float(np.percentile(tv, 50)) if tv.size else 0
+    tci_p75 = float(np.percentile(tv, 75)) if tv.size else 0
+    tci_p98 = float(np.percentile(tv, 98)) if tv.size else 0
+    pct_extreme = float(100*(tv>38).sum()/tv.size) if tv.size else 0
+    sr_p98  = float(np.percentile(sv, 98)) if sv.size else 0
+    pz_pct  = 0.0
+    if tv.size and sv.size:
+        tf = tci.flatten(); sf = sr.flatten()
+        m  = ~(np.isnan(tf) | np.isnan(sf))
+        if m.sum() > 0:
+            tt = float(np.percentile(tf[m], 70)); st2 = float(np.percentile(sf[m], 70))
+            pz_pct = round(100*((tf[m]>=tt)&(sf[m]>=st2)).sum()/m.sum(), 1)
+
+    # Estimated derived metrics for 7-bar comparison
+    surf_temp_b  = avg_tci + 8.0          # surface temp ≈ UTCI + offset
+    surf_temp_e  = max(22, surf_temp_b - 9.5)
+    svf_b        = max(0.30, min(0.85, 1 - pz_pct / 100 * 0.6))   # baseline SVF
+    svf_e        = max(0.20, svf_b - 0.25)                          # canopy reduces SVF
+    et_b         = max(0.5, avg_sr * 0.06)                          # ET cooling W/m²
+    et_e         = min(et_b * 3.2, et_b + 4.5)                      # trees boost ET
+    wind_b       = 2.8                                               # typical urban m/s
+    wind_e       = max(0.5, wind_b - 0.9)                           # canopy dampens wind
+    daylight_b   = max(0.55, min(0.92, 1 - pz_pct / 200))          # fraction
+    daylight_e   = max(0.35, daylight_b - 0.20)                    # canopy reduces daylight
+
+    def _bar_row(lbl, b_lbl, e_lbl, bp, ep):
+        return (
+            f'<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.65rem">'
+            f'<div style="font-family:\'DM Mono\',monospace;font-size:9px;color:var(--muted);'
+            f'width:76px;flex-shrink:0;text-transform:uppercase;letter-spacing:.06em;line-height:1.3">{lbl}</div>'
+            f'<div style="flex:1">'
+            f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">'
+            f'<div style="height:7px;border-radius:4px;background:#c0352a;width:{int(min(1,bp)*100)}%;min-width:2px"></div>'
+            f'<div style="font-family:\'DM Mono\',monospace;font-size:9px;color:var(--muted)">{b_lbl}</div></div>'
+            f'<div style="display:flex;align-items:center;gap:6px">'
+            f'<div style="height:7px;border-radius:4px;background:#2a8a5a;width:{int(min(1,ep)*100)}%;min-width:2px"></div>'
+            f'<div style="font-family:\'DM Mono\',monospace;font-size:9px;color:var(--muted)">{e_lbl}</div></div>'
+            f'</div></div>'
+        )
+
+    bars_html = (
+        _bar_row("Surface\nTemp",
+                 f"{surf_temp_b:.1f}\u00b0C base",  f"{surf_temp_e:.1f}\u00b0C + trees",
+                 surf_temp_b / 55, surf_temp_e / 55)
+        + _bar_row("UTCI\nMean",
+                   f"{avg_tci:.1f}\u00b0C base",  f"{max(22,avg_tci-7.5):.1f}\u00b0C + trees",
+                   avg_tci / 45, max(22, avg_tci - 7.5) / 45)
+        + _bar_row("SVF",
+                   f"{svf_b:.2f} base",  f"{svf_e:.2f} + trees",
+                   svf_b, svf_e)
+        + _bar_row("ET\nCooling",
+                   f"{et_b:.1f} W/m\u00b2 base",  f"{et_e:.1f} W/m\u00b2 + trees",
+                   et_b / 6, et_e / 6)
+        + _bar_row("Solar\nRad.",
+                   f"{avg_sr:.1f} kWh/m\u00b2 base",  f"{avg_sr*0.45:.1f} kWh/m\u00b2 + trees",
+                   avg_sr / 10, avg_sr * 0.45 / 10)
+        + _bar_row("Wind\nSpeed",
+                   f"{wind_b:.1f} m/s base",  f"{wind_e:.1f} m/s + trees",
+                   wind_b / 5, wind_e / 5)
+        + _bar_row("Daylight\nFactor",
+                   f"{daylight_b:.0%} base",  f"{daylight_e:.0%} + trees",
+                   daylight_b, daylight_e)
     )
 
     # AI-driven design strategies (fallback to contextual defaults)
@@ -1183,20 +1336,6 @@ def _build_aec():
         f'{r.split("\u2014",1)[1].strip() if "\u2014" in r else ""}</div></div>'
         for i, r in enumerate(ai_recs[:5])
     )
-
-    # Technical distribution stats for AEC header
-    tci_p50 = float(np.percentile(tv, 50)) if tv.size else 0
-    tci_p75 = float(np.percentile(tv, 75)) if tv.size else 0
-    tci_p98 = float(np.percentile(tv, 98)) if tv.size else 0
-    pct_extreme = float(100*(tv>38).sum()/tv.size) if tv.size else 0
-    sr_p98  = float(np.percentile(sv, 98)) if sv.size else 0
-    pz_pct  = 0.0
-    if tv.size and sv.size:
-        tf = tci.flatten(); sf = sr.flatten()
-        m  = ~(np.isnan(tf) | np.isnan(sf))
-        if m.sum() > 0:
-            tt = float(np.percentile(tf[m], 70)); st2 = float(np.percentile(sf[m], 70))
-            pz_pct = round(100*((tf[m]>=tt)&(sf[m]>=st2)).sum()/m.sum(), 1)
 
     stat_pill = (
         lambda lbl, val: f'<span style="display:inline-flex;flex-direction:column;'
@@ -1233,9 +1372,9 @@ def _build_aec():
 
     ecosystem_tab = pn.Column(
         _h(f'<div style="padding:1rem 1.2rem;border-bottom:1px solid var(--border)">'
-           f'<div style="font-size:12px;font-weight:500;margin-bottom:.7rem">Ecosystem Services \u2014 Current Baseline</div>'),
+           f'<div style="font-size:12px;font-weight:500;margin-bottom:.4rem">Ecosystem Services \u2014 Baseline vs. Canopy Intervention</div>'
+           f'{legend_html}</div>'),
         radar,
-        _h('</div>'),
         _h(f'<div style="padding:0 1.2rem 1rem">'
            f'<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;letter-spacing:.14em;'
            f'text-transform:uppercase;color:var(--muted);margin-bottom:.5rem;margin-top:.8rem;'

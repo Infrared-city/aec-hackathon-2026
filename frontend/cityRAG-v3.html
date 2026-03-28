@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>cityRAG — Urban Intelligence Platform</title>
+<title>cityAgent — Urban Intelligence Platform</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Fraunces:ital,opsz,wght@0,9..144,200;0,9..144,300;0,9..144,400;0,9..144,500;1,9..144,200;1,9..144,300&family=Instrument+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
 /* ══════════════════════════════════════════════════════
@@ -251,7 +251,7 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
 .map-fade-right { position: absolute; top: 0; right: 0; width: 80px; bottom: 0; background: linear-gradient(to left, var(--surface), transparent); pointer-events: none; z-index: 3; }
 
 /* Right panel */
-.right-panel { width: 420px; flex-shrink: 0; background: var(--surface); display: flex; flex-direction: column; overflow: hidden; }
+.right-panel { width: 520px; flex-shrink: 0; background: var(--surface); display: flex; flex-direction: column; overflow: hidden; }
 .rp-scroll { flex: 1; overflow-y: auto; padding: 1rem 1.3rem; }
 .rp-scroll::-webkit-scrollbar { width: 3px; }
 .rp-scroll::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
@@ -366,11 +366,11 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
 /* ══════════════════════════════════════════════════════
    CITIZEN DASHBOARD
 ══════════════════════════════════════════════════════ */
-.ct-right { width: 440px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface); overflow: hidden; }
+.ct-right { width: 520px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface); overflow: hidden; }
 
 /* Street view — BIG */
 .sv-block {
-  height: 280px; flex-shrink: 0; position: relative; overflow: hidden;
+  height: 48vh; min-height: 340px; flex-shrink: 0; position: relative; overflow: hidden;
   background: #0c1520; border-bottom: 1px solid var(--border2);
 }
 .sv-block canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -472,7 +472,7 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
 /* ══════════════════════════════════════════════════════
    AEC DASHBOARD
 ══════════════════════════════════════════════════════ */
-.aec-right { width: 440px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface); overflow: hidden; }
+.aec-right { width: 520px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface); overflow: hidden; }
 
 /* AEC inner tabs */
 .aec-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
@@ -557,7 +557,7 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
   <div class="land-glow"></div>
 
   <div class="land-inner">
-    <div class="wordmark">city<em>RAG</em></div>
+    <div class="wordmark">city<em>Agent</em></div>
     <div class="tagline">Urban Environmental Intelligence Platform</div>
 
     <div class="prompt-shell" id="prompt-shell">
@@ -570,7 +570,7 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
       </div>
       <div class="prompt-row">
         <input class="main-input" id="main-input" type="text"
-          placeholder="e.g. Where is outdoor thermal comfort best for pedestrians this summer?"
+          placeholder="e.g. &quot;Assess outdoor comfort at Bryghuspladsen in summer&quot; · Try a location, a question, or a design goal"
           autocomplete="off">
         <button class="run-btn" onclick="runAnalysis()">Analyse →</button>
       </div>
@@ -586,16 +586,16 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
 
     <div class="example-row">
       <div class="ep-card sh" onclick="fillPrompt(this)">
-        <div class="ep-type sh">🏛 Stakeholder</div>
-        <div class="ep-text">Assess outdoor thermal comfort and solar radiation performance for the public space at Bryghuspladsen, Copenhagen — summer conditions</div>
+        <div class="ep-type sh">🏛 Stakeholder / Decision-maker</div>
+        <div class="ep-text">Provide an environmental performance assessment for the public space at Bryghuspladsen, Copenhagen — include thermal comfort and solar radiation KPIs for this summer</div>
       </div>
       <div class="ep-card ct" onclick="fillPrompt(this)">
-        <div class="ep-type ct">🚶 Citizen</div>
-        <div class="ep-text">Find me the most shaded and comfortable cycling route through Copenhagen city centre right now</div>
+        <div class="ep-type ct">🚶 Private Citizen</div>
+        <div class="ep-text">I want to take my kids outside this afternoon near Nørreport — is it too hot? Where are the shadiest and most comfortable streets to walk?</div>
       </div>
       <div class="ep-card aec" onclick="fillPrompt(this)">
-        <div class="ep-type aec">📐 AEC Expert</div>
-        <div class="ep-text">Analyse tree placement opportunities and vegetation cooling potential to reduce urban heat island intensity near Nørreport Station</div>
+        <div class="ep-type aec">📐 AEC Expert / Urban Designer</div>
+        <div class="ep-text">Run a UTCI thermal comfort and solar radiation baseline analysis for the Vesterbro district — I need to identify priority zones for urban greening and canopy placement</div>
       </div>
     </div>
   </div>
@@ -605,7 +605,7 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
      STATUS
 ══════════════════════════════════════════════════════ -->
 <div class="screen hidden" id="screen-status">
-  <div class="status-wordmark">city<em>RAG</em></div>
+  <div class="status-wordmark">city<em>Agent</em></div>
   <div class="status-sub">Running agentic workflow</div>
 
   <div class="detect-badge" id="detect-badge">
@@ -613,14 +613,14 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
   </div>
 
   <div class="agent-steps" id="agent-steps">
-    <div class="astep"><div class="astep-dot"></div><span class="as-t">Classifier agent — intent &amp; user profile detection</span></div>
-    <div class="astep"><div class="astep-dot"></div><span class="as-t">get_buildings() → OpenStreetMap geometry</span></div>
-    <div class="astep"><div class="astep-dot"></div><span class="as-t">get_weather_data() → EPW climate file fetch</span></div>
-    <div class="astep"><div class="astep-dot"></div><span class="as-t" id="sim1-label">run_simulation() → Infrared.city API</span></div>
-    <div class="astep"><div class="astep-dot"></div><span class="as-t" id="sim2-label">run_secondary_sim() → Infrared.city API</span></div>
-    <div class="astep"><div class="astep-dot"></div><span class="as-t">zone_statistics() → score normalisation 0 → 1</span></div>
-    <div class="astep"><div class="astep-dot"></div><span class="as-t">Synthesiser agent — insights &amp; recommendations</span></div>
-    <div class="astep"><div class="astep-dot"></div><span class="as-t">Routing to personalised dashboard…</span></div>
+    <div class="astep"><div class="astep-dot"></div><span class="as-t">Understanding your request…</span></div>
+    <div class="astep"><div class="astep-dot"></div><span class="as-t">Retrieving building geometry…</span></div>
+    <div class="astep"><div class="astep-dot"></div><span class="as-t">Loading climate data…</span></div>
+    <div class="astep"><div class="astep-dot"></div><span class="as-t">Running thermal comfort simulation…</span></div>
+    <div class="astep"><div class="astep-dot"></div><span class="as-t">Running solar radiation analysis…</span></div>
+    <div class="astep"><div class="astep-dot"></div><span class="as-t">Computing performance statistics…</span></div>
+    <div class="astep"><div class="astep-dot"></div><span class="as-t">Generating insights…</span></div>
+    <div class="astep"><div class="astep-dot"></div><span class="as-t">Preparing your dashboard…</span></div>
   </div>
 
   <div class="progress-track">
@@ -633,7 +633,7 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
 ══════════════════════════════════════════════════════ -->
 <div class="dashboard hidden" id="dash-stakeholder">
   <div class="dash-top">
-    <div class="dash-logo">city<em>RAG</em></div>
+    <div class="dash-logo">city<em>Agent</em></div>
     <div class="dash-sep"></div>
     <div class="dash-title">Bryghuspladsen 8, Copenhagen — Environmental Performance Assessment</div>
     <div class="dash-cat-pill" style="color:var(--sh);border-color:rgba(200,96,26,0.35);background:var(--sh3)">🏛 Stakeholder</div>
@@ -646,7 +646,7 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
       <canvas id="sh-rasterCanvas" style="mix-blend-mode:multiply;opacity:0;transition:opacity 1.2s ease;position:absolute;inset:0;width:100%;height:100%"></canvas>
       <div class="welcome-banner">
         <div class="wb-greeting">Welcome, Stakeholder</div>
-        <div class="wb-sub">cityRAG · Environmental Performance Dashboard</div>
+        <div class="wb-sub">cityAgent · Environmental Performance Dashboard</div>
       </div>
       <div class="map-fade-right"></div>
     </div>
@@ -680,77 +680,44 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
         </div>
       </div>
 
-      <!-- Sim selector -->
+      <!-- Sim selector — only the 2 analyses we run -->
       <div class="sim-strip">
-        <button class="sim-chip active" onclick="shSim(this,'thermal')">Thermal UTCI</button>
-        <button class="sim-chip" onclick="shSim(this,'wind')">Wind Speed</button>
+        <button class="sim-chip active" onclick="shSim(this,'thermal')">Thermal Comfort UTCI</button>
         <button class="sim-chip" onclick="shSim(this,'solar')">Solar Radiation</button>
-        <button class="sim-chip" onclick="shSim(this,'svf')">Sky View Factor</button>
-        <button class="sim-chip" onclick="shSim(this,'daylight')">Daylight Avail.</button>
-        <button class="sim-chip" onclick="shSim(this,'shadow')">Shadow / Sun hrs</button>
-        <button class="sim-chip" onclick="shSim(this,'wind_comfort')">Wind Comfort</button>
       </div>
 
       <!-- KPIs -->
       <div class="rp-scroll">
-        <div class="kpi-header">KEY PERFORMANCE<br>INDICATORS</div>
+        <div class="sec-label" style="margin-top:0">KPI — KEY PERFORMANCE INDICATORS</div>
 
         <div class="kpi-grid">
           <div class="kpi-card" id="sh-k0">
             <span class="kpi-icon">🌡</span>
-            <div class="kpi-name">Thermal Comfort</div>
-            <div class="kpi-val">21.4 <span class="kpi-unit">°C UTCI</span></div>
-            <div class="kpi-note">Range 18–26°C = comfort zone</div>
-            <div class="kpi-bar"><div class="kpi-bar-fill" style="width:78%;background:var(--score-lg)"></div></div>
+            <div class="kpi-name">Mean Thermal Comfort</div>
+            <div class="kpi-val" id="sh-kv0">31.4 <span class="kpi-unit">°C UTCI</span></div>
+            <div class="kpi-note">Comfort zone: 18–26°C · UTCI official scale</div>
+            <div class="kpi-bar"><div class="kpi-bar-fill" id="sh-kb0" style="width:42%;background:var(--score-ora)"></div></div>
           </div>
           <div class="kpi-card" id="sh-k1">
-            <span class="kpi-icon">💨</span>
-            <div class="kpi-name">Wind Speed</div>
-            <div class="kpi-val">2.8 <span class="kpi-unit">m/s</span></div>
-            <div class="kpi-note">Optimum &lt; 3 m/s pedestrian</div>
-            <div class="kpi-bar"><div class="kpi-bar-fill" style="width:88%;background:var(--score-dg)"></div></div>
+            <span class="kpi-icon">🔥</span>
+            <div class="kpi-name">Heat-Stressed Area</div>
+            <div class="kpi-val" id="sh-kv1">38 <span class="kpi-unit">% of tile</span></div>
+            <div class="kpi-note">UTCI &gt; 32°C = strong heat stress threshold</div>
+            <div class="kpi-bar"><div class="kpi-bar-fill" id="sh-kb1" style="width:38%;background:var(--score-red)"></div></div>
           </div>
           <div class="kpi-card" id="sh-k2">
             <span class="kpi-icon">☀️</span>
             <div class="kpi-name">Solar Radiation</div>
-            <div class="kpi-val">342 <span class="kpi-unit">W/m²</span></div>
-            <div class="kpi-note">200–400 W/m² = pedestrian comfort</div>
-            <div class="kpi-bar"><div class="kpi-bar-fill" style="width:70%;background:var(--score-lg)"></div></div>
+            <div class="kpi-val" id="sh-kv2">5.3 <span class="kpi-unit">kWh/m²</span></div>
+            <div class="kpi-note">Mean over 512 × 512 m tile · summer period</div>
+            <div class="kpi-bar"><div class="kpi-bar-fill" id="sh-kb2" style="width:53%;background:var(--score-ora)"></div></div>
           </div>
           <div class="kpi-card" id="sh-k3">
-            <span class="kpi-icon">🌤</span>
-            <div class="kpi-name">Sky View Factor</div>
-            <div class="kpi-val">0.74 <span class="kpi-unit">SVF</span></div>
-            <div class="kpi-note">Optimum &gt; 0.7 · good openness</div>
-            <div class="kpi-bar"><div class="kpi-bar-fill" style="width:74%;background:var(--score-lg)"></div></div>
-          </div>
-          <div class="kpi-card" id="sh-k4">
-            <span class="kpi-icon">💡</span>
-            <div class="kpi-name">Daylight Availability</div>
-            <div class="kpi-val">64 <span class="kpi-unit">%</span></div>
-            <div class="kpi-note">Optimum &gt; 50% of hours</div>
-            <div class="kpi-bar"><div class="kpi-bar-fill" style="width:64%;background:var(--score-lg)"></div></div>
-          </div>
-          <div class="kpi-card" id="sh-k5">
-            <span class="kpi-icon">🌑</span>
-            <div class="kpi-name">Direct Sun Hours</div>
-            <div class="kpi-val">3.2 <span class="kpi-unit">h/day</span></div>
-            <div class="kpi-note">2–4 h/day = seasonal balance</div>
-            <div class="kpi-bar"><div class="kpi-bar-fill" style="width:70%;background:var(--score-lg)"></div></div>
-          </div>
-          <div class="kpi-card" id="sh-k6">
-            <span class="kpi-icon">🌬</span>
-            <div class="kpi-name">Wind Comfort</div>
-            <div class="kpi-val">B–C <span class="kpi-unit">Lawson</span></div>
-            <div class="kpi-note">Suitable for sitting &amp; strolling</div>
-            <div class="kpi-bar"><div class="kpi-bar-fill" style="width:65%;background:var(--score-yel)"></div></div>
-          </div>
-          <div class="kpi-card" id="sh-k7">
-            <span class="kpi-icon">📊</span>
-            <div class="kpi-name">Comfort Statistics</div>
-            <div class="kpi-val">58 <span class="kpi-unit">%</span></div>
-            <div class="kpi-note">% of time in comfort range</div>
-            <div class="kpi-bar"><div class="kpi-bar-fill" style="width:58%;background:var(--score-yel)"></div></div>
+            <span class="kpi-icon">🌿</span>
+            <div class="kpi-name">Priority Greening Zone</div>
+            <div class="kpi-val" id="sh-kv3">22 <span class="kpi-unit">% of tile</span></div>
+            <div class="kpi-note">High UTCI + high solar load — urgent tree planting</div>
+            <div class="kpi-bar"><div class="kpi-bar-fill" id="sh-kb3" style="width:22%;background:var(--score-ora)"></div></div>
           </div>
         </div>
 
@@ -787,7 +754,9 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
           <div class="rec-delta">↑ Score +0.05 · Solar Radiation KPI</div>
         </div>
 
-        <div style="height:1.5rem"></div>
+        <div style="padding:0.5rem 0 1.5rem">
+          <button class="new-q-btn" style="width:100%;justify-content:center;padding:12px;border-radius:9px;font-size:14px" onclick="goHome()">+ Start new analysis</button>
+        </div>
       </div>
     </div>
   </div>
@@ -798,7 +767,7 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
 ══════════════════════════════════════════════════════ -->
 <div class="dashboard hidden" id="dash-citizen">
   <div class="dash-top">
-    <div class="dash-logo">city<em>RAG</em></div>
+    <div class="dash-logo">city<em>Agent</em></div>
     <div class="dash-sep"></div>
     <div class="dash-title">Best shaded cycling route — Copenhagen city centre</div>
     <div class="dash-cat-pill" style="color:var(--ct);border-color:rgba(42,110,168,0.35);background:var(--ct3)">🚶 Citizen</div>
@@ -811,7 +780,7 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
       <canvas id="ct-rasterCanvas" style="mix-blend-mode:multiply;opacity:0;transition:opacity 1.2s ease;position:absolute;inset:0;width:100%;height:100%"></canvas>
       <div class="welcome-banner">
         <div class="wb-greeting">Welcome, Explorer</div>
-        <div class="wb-sub">cityRAG · Citizen Mobility &amp; Comfort Dashboard</div>
+        <div class="wb-sub">cityAgent · Your Comfort &amp; Neighbourhood Dashboard</div>
       </div>
       <div class="map-fade-right"></div>
     </div>
@@ -822,13 +791,16 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
       <div class="sv-block">
         <canvas id="sv-canvas"></canvas>
         <div class="sv-top-bar">
-          <div class="sv-location">📍 Bryghuspladsen, Copenhagen · 55.6723°N</div>
-          <div class="sv-analysis-badge">💨 Wind speed analysis active</div>
+          <div class="sv-location" id="sv-location-lbl">📍 Bryghuspladsen, Copenhagen · 55.6723°N</div>
+          <div style="display:flex;align-items:center;gap:0.5rem">
+            <div class="sv-analysis-badge" id="sv-analysis-badge">🌡 Thermal comfort analysis</div>
+            <button onclick="requestGPS()" style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);border-radius:999px;padding:3px 10px;font-family:'DM Mono',monospace;font-size:9.5px;color:rgba(255,255,255,0.85);cursor:pointer;backdrop-filter:blur(8px)">📡 GPS</button>
+          </div>
         </div>
         <div class="sv-bot-bar">
           <div class="sv-compass">🧭 NW</div>
           <button class="sv-enter-btn" id="sv-enter-btn" onclick="toggleWalk()">
-            👁 Enter space
+            📍 Explore this space
           </button>
         </div>
       </div>
@@ -864,7 +836,7 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
       <!-- Tabs -->
       <div class="ct-tabs">
         <div class="ct-tab active" onclick="ctTab(this,'services')">Nearby Services</div>
-        <div class="ct-tab" onclick="ctTab(this,'env')">Env. Analysis</div>
+        <div class="ct-tab" onclick="ctTab(this,'env')">Environmental Analysis</div>
         <div class="ct-tab" onclick="ctTab(this,'route')">Route Quality</div>
       </div>
 
@@ -910,18 +882,21 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
 
       <!-- Env analysis panel -->
       <div class="ct-panel hidden" id="ct-panel-env">
-        <div class="sec-label" style="margin-top:0.6rem">Active environmental analysis</div>
-        <div class="env-analysis-block">
-          <div class="env-analysis-title">💨 Wind Speed Analysis (Infrared.city)</div>
-          <div><span class="env-analysis-val">2.4</span><span class="env-analysis-unit">m/s mean at pedestrian level</span></div>
-          <div class="env-analysis-note">Wind conditions are within the pedestrian comfort range (&lt;3 m/s). The recommended cycling route avoids the exposed harbour-side corridor where wind peaks at 4.1 m/s. The sheltered inland route via Gothersgade maintains wind below 2.0 m/s for 78% of its length.</div>
+        <div class="sec-label" style="margin-top:0.6rem">How does it feel outside right now?</div>
+        <div class="env-analysis-block" id="ct-env-block">
+          <div class="env-analysis-title" id="ct-env-title">🌡 Thermal Comfort — Infrared.city simulation</div>
+          <div><span class="env-analysis-val" id="ct-env-val">31.4</span><span class="env-analysis-unit">°C UTCI · feels like at pedestrian level</span></div>
+          <div class="env-analysis-note" id="ct-env-note">This is warmer than the 26°C comfort threshold. It can feel quite hot outside, especially in direct sunlight. The map shows which streets stay coolest — look for shaded, tree-lined paths for a more comfortable walk.</div>
         </div>
-        <div class="sec-label">Weather forecast (today)</div>
-        <div class="rq-row"><div class="rq-icon">🌤</div><div class="rq-label">Partly cloudy · 14°C ambient</div><div class="rq-val rq-good">Comfortable</div></div>
-        <div class="rq-row"><div class="rq-icon">🌬</div><div class="rq-label">Wind: SW 2.4 m/s (gusts 3.8)</div><div class="rq-val rq-good">Low</div></div>
-        <div class="rq-row"><div class="rq-icon">💧</div><div class="rq-label">Humidity: 68%</div><div class="rq-val rq-good">Comfortable</div></div>
-        <div class="rq-row"><div class="rq-icon">☀️</div><div class="rq-label">UV Index: 3</div><div class="rq-val rq-good">Moderate</div></div>
-        <div class="rq-row"><div class="rq-icon">🌡</div><div class="rq-label">UTCI estimated</div><div class="rq-val rq-good">~16°C (slight cool)</div></div>
+        <div class="sec-label">UTCI comfort guide — what the temperature means</div>
+        <div class="rq-row"><div class="rq-icon">🧊</div><div class="rq-label">Below 9°C — Very cold conditions</div><div class="rq-val rq-bad">Cold stress</div></div>
+        <div class="rq-row"><div class="rq-icon">😊</div><div class="rq-label">9–26°C — Comfortable outdoor conditions</div><div class="rq-val rq-good">Comfortable</div></div>
+        <div class="rq-row"><div class="rq-icon">☀️</div><div class="rq-label">26–32°C — Warm, some heat stress possible</div><div class="rq-val rq-mid">Moderate</div></div>
+        <div class="rq-row"><div class="rq-icon">🥵</div><div class="rq-label">32–38°C — Hot, limit time in direct sun</div><div class="rq-val rq-bad">Heat stress</div></div>
+        <div class="rq-row"><div class="rq-icon">🚨</div><div class="rq-label">Above 38°C — Dangerous heat, seek shade or AC</div><div class="rq-val rq-bad">Extreme heat</div></div>
+        <div style="padding:0.5rem 0 0.5rem">
+          <button class="new-q-btn" style="width:100%;justify-content:center;padding:11px;border-radius:9px;font-size:14px" onclick="goHome()">+ Start new analysis</button>
+        </div>
       </div>
 
       <!-- Route quality panel -->
@@ -946,7 +921,7 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
 ══════════════════════════════════════════════════════ -->
 <div class="dashboard hidden" id="dash-aec">
   <div class="dash-top">
-    <div class="dash-logo">city<em>RAG</em></div>
+    <div class="dash-logo">city<em>Agent</em></div>
     <div class="dash-sep"></div>
     <div class="dash-title">Vegetation cooling analysis — heat island assessment · Nørreport Station area</div>
     <div class="dash-cat-pill" style="color:var(--aec);border-color:rgba(42,138,90,0.35);background:var(--aec3)">📐 AEC Expert</div>
@@ -959,7 +934,7 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
       <canvas id="aec-rasterCanvas" style="mix-blend-mode:multiply;opacity:0;transition:opacity 1.2s ease;position:absolute;inset:0;width:100%;height:100%"></canvas>
       <div class="welcome-banner">
         <div class="wb-greeting">Welcome, Expert</div>
-        <div class="wb-sub">cityRAG · AEC Technical Analysis Dashboard</div>
+        <div class="wb-sub">cityAgent · AEC Technical Analysis Dashboard</div>
       </div>
       <div class="map-fade-right"></div>
     </div>
@@ -983,14 +958,14 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
               <div class="rl"><div class="rl-dot" style="background:var(--aec)"></div><div class="rl-lbl">+ Trees</div></div>
             </div>
           </div>
-          <canvas id="aec-radar" width="396" height="220"></canvas>
+          <canvas id="aec-radar" width="396" height="260"></canvas>
         </div>
 
         <div style="padding:0 1.2rem 1rem">
           <div class="sec-label" style="margin-top:0">Analysis Summary — Summer Conditions</div>
           <div class="analysis-box" id="aec-summary">
-            The site currently exhibits an urban heat island intensity of <strong>+4.2°C</strong> relative to the rural reference, driven by high surface coverage, limited vegetation, and an elevated sky view factor (SVF 0.91) exposing surfaces to direct solar load throughout the day. Peak surface temperatures reach <strong>36–38°C</strong> in July, resulting in UTCI values of 30–34°C during afternoon hours — well beyond the thermal comfort threshold.<br><br>
-            Simulated introduction of <strong>18 deciduous trees</strong> (Tilia cordata, canopy diameter 6–8 m, placed at 8 m spacing) reduces mean radiant temperature by <strong>−6.4°C</strong>, brings UTCI into the 22–26°C comfort range for 74% of occupied hours, and provides <strong>38 W/m² of evapotranspirative cooling</strong>. Estimated CO₂ sequestration: <strong>12.4 t CO₂/year</strong>. Biodiversity index improves from 0.18 to 0.54 (BREEAM baseline reference).
+            The 512 × 512 m analysis tile exhibits mean UTCI of <strong>31.4°C</strong> during summer peak hours, with <strong>38% of the tile</strong> exceeding the 32°C strong heat-stress threshold. Mean solar irradiance at pedestrian level reaches <strong>5.3 kWh/m²</strong>. The highest thermal and solar loads co-occur across <strong>22% of the tile</strong> — the primary target zone for greening intervention.<br><br>
+            Introducing deciduous tree canopy at 8 m spacing in the priority zone is projected to reduce mean radiant temperature by <strong>−5 to −7°C</strong>, bringing affected cells into the 22–26°C UTCI comfort range. Mean solar radiation in the canopy zone would be reduced by approximately <strong>55–70%</strong> during peak summer hours.
           </div>
 
           <div class="sec-label">Design strategies &amp; recommendations</div>
@@ -1005,13 +980,13 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
             <div class="strat-tag">Solar radiation · Shadow analysis</div>
           </div>
           <div class="strat-card" id="aec-s2">
-            <div class="strat-top"><span class="strat-n">03</span><span class="strat-title">Biodiverse understory to raise biodiversity score</span></div>
-            <div class="strat-body">Beneath the tree canopies, introduce a native shrub and groundcover layer (e.g. Geranium sanguineum, Festuca glauca). This raises the biodiversity index from 0.54 to an estimated 0.72, above the threshold for ecological network connectivity at the neighbourhood scale.</div>
-            <div class="strat-tag">Biodiversity · Air quality</div>
+            <div class="strat-top"><span class="strat-n">03</span><span class="strat-title">Understory layer beneath canopy</span></div>
+            <div class="strat-body">Native shrub and groundcover beneath the tree canopy (e.g. Geranium sanguineum, Festuca glauca) increases evapotranspirative surface area and reduces reflected solar radiation on adjacent facades — additional 1–2°C UTCI reduction at street level.</div>
+            <div class="strat-tag">Evapotranspiration · Urban cooling</div>
           </div>
           <div class="strat-card" id="aec-s3">
             <div class="strat-top"><span class="strat-n">04</span><span class="strat-title">High-albedo permeable paving in non-planted zones</span></div>
-            <div class="strat-body">Apply high-solar-reflectance permeable paving (albedo ≥ 0.40) in the remaining hard-surface areas to reduce stored heat re-radiation. This lowers the evening UTCI by an additional 1–2°C and contributes to stormwater management — reducing runoff by approximately 60% during peak rainfall events.</div>
+            <div class="strat-body">Apply high-solar-reflectance permeable paving (albedo ≥ 0.40) in hard-surface areas where solar load exceeds the tile mean. Reduces stored-heat re-radiation by ~22% and lowers evening UTCI by an additional 1–2°C outside canopy zones.</div>
             <div class="strat-tag">Solar radiation · Urban heat island</div>
           </div>
           <div class="strat-card" id="aec-s4">
@@ -1098,12 +1073,13 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
           55.6832, 12.5695, Acer platanoides, 7.0, 14.0, 3.8<br>
           …
         </div>
-        <div class="sec-label">Simulation parameters ready</div>
-        <div class="rq-row"><div class="rq-icon">🌿</div><div class="rq-label">MAESPA evapotranspiration model</div><div class="rq-val rq-good">Ready</div></div>
-        <div class="rq-row"><div class="rq-icon">☀️</div><div class="rq-label">Radiance raytracing (shading)</div><div class="rq-val rq-good">Ready</div></div>
-        <div class="rq-row"><div class="rq-icon">💨</div><div class="rq-label">PANDO wind-vegetation interaction</div><div class="rq-val rq-good">Ready</div></div>
-        <div class="rq-row"><div class="rq-icon">🌡</div><div class="rq-label">UTCI re-calculation with canopy</div><div class="rq-val rq-good">Ready</div></div>
-        <div style="height:1rem"></div>
+        <div class="sec-label">Next step — vegetation re-simulation</div>
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:0.9rem 1rem;font-size:12px;color:var(--muted);line-height:1.75;margin-bottom:1rem">
+          Upload your tree coordinates in the <strong style="color:var(--ink)">Tree Placement</strong> tab. The system will overlay your canopy onto the 512 × 512 m tile and compute the UTCI thermal comfort delta — before vs. after planting.
+        </div>
+        <div style="padding:0.2rem 0 1.5rem">
+          <button class="new-q-btn" style="width:100%;justify-content:center;padding:12px;border-radius:9px;font-size:14px" onclick="goHome()">+ Start new analysis</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1124,17 +1100,16 @@ const USERS = {
     accent: '#c8601a',
     bg: 'rgba(200,96,26,0.1)',
     border: 'rgba(200,96,26,0.3)',
-    keywords: ['leed','bd+c','sustainability','report','assessment','credit','municipal','policy','plan','urban plan','stakeholder','score','performance','environmental impact','master plan','district','site','public space','plaza'],
-    sims: ['run_thermal_comfort_UTCI() → Infrared.city API','run_solar_radiation() → Infrared.city API'],
+    keywords: ['leed','bd+c','sustainability','report','assessment','credit','municipal','policy','plan','urban plan','stakeholder','score','performance','environmental impact','master plan','district','site','public space','plaza','kpi','decision','governance'],
     steps: [
-      'Classifier agent — stakeholder profile confirmed',
-      'get_buildings() → OpenStreetMap geometry',
-      'get_weather_data() → EPW climate file + solar data',
-      'run_thermal_comfort_UTCI() → Infrared.city API',
-      'run_solar_radiation() → Infrared.city API',
-      'zone_statistics() → composite score normalisation 0→1',
-      'Synthesiser agent — KPI mapping &amp; recommendations',
-      'Routing to stakeholder environmental dashboard'
+      'Understanding your request — identifying location and performance objectives',
+      'Retrieving building footprints and urban geometry from OpenStreetMap',
+      'Loading Copenhagen climate data — temperature, humidity, wind and solar radiation',
+      'Running thermal comfort simulation — mapping pedestrian-level heat stress across the site',
+      'Running solar radiation analysis — measuring incoming solar load across the 512 × 512 m tile',
+      'Computing performance statistics — scoring comfort zones and heat-stress areas',
+      'Generating insights — mapping results to urban performance indicators',
+      'Preparing your Environmental Performance Dashboard'
     ]
   },
   citizen: {
@@ -1142,17 +1117,16 @@ const USERS = {
     accent: '#2a6ea8',
     bg: 'rgba(42,110,168,0.1)',
     border: 'rgba(42,110,168,0.3)',
-    keywords: ['coffee','cafe','route','cycling','run','jog','walk','bike','shade','wind','outside','park','commute','find','go','where','best','today','now','cozy','sheltered','shaded','drink','sit','eat'],
-    sims: ['run_wind_speed() → Infrared.city API','run_shadow_analysis() → Infrared.city API'],
+    keywords: ['coffee','cafe','route','cycling','run','jog','walk','bike','shade','outside','park','commute','find','where','best','today','now','cozy','sheltered','shaded','drink','sit','eat','kids','children','hot','cool','comfortable','neighbourhood','neighborhood','street','summer','winter'],
     steps: [
-      'Classifier agent — citizen / mobility profile confirmed',
-      'get_buildings() → OpenStreetMap geometry + POI',
-      'get_weather_data() → real-time forecast + EPW',
-      'run_wind_speed() → Infrared.city API',
-      'run_shadow_analysis() → Infrared.city API',
-      'walkscore_compute() → route quality &amp; proximity scoring',
-      'Synthesiser agent — comfort &amp; mobility index',
-      'Routing to citizen mobility dashboard'
+      'Understanding what matters to you — reading your question and location',
+      'Mapping the area — finding buildings, parks, and places around you',
+      'Checking local climate conditions — temperature, wind and sunlight for your area',
+      'Running thermal comfort analysis — finding the hottest and coolest spots near you',
+      'Analysing solar conditions — identifying shaded streets and sun-exposed open spaces',
+      'Scoring nearby services — walking distances to parks, shops and transport',
+      'Putting it all together — explaining what the analysis means for your daily life',
+      'Opening your personal comfort and neighbourhood dashboard'
     ]
   },
   aec: {
@@ -1160,17 +1134,16 @@ const USERS = {
     accent: '#2a8a5a',
     bg: 'rgba(42,138,90,0.1)',
     border: 'rgba(42,138,90,0.3)',
-    keywords: ['tree','vegetation','utci','svf','sky view','microclimate','simulation','envi','ladybug','grasshopper','heat island','designer','planner','architect','engineer','landscape','analysis','placement','cooling','evapotranspiration','biodiversity','canopy','radiance','pando','maespa','lim','rhino','design','urban morphology','biomass'],
-    sims: ['run_thermal_comfort_UTCI() → Infrared.city API','run_vegetation_cooling_ET() → Infrared.city API'],
+    keywords: ['tree','vegetation','utci','svf','sky view','microclimate','simulation','envi','ladybug','grasshopper','heat island','designer','planner','architect','engineer','landscape','analysis','placement','cooling','evapotranspiration','canopy','radiance','rhino','design','urban morphology','biomass','baseline','infrared'],
     steps: [
-      'Classifier agent — AEC expert / technical profile confirmed',
-      'get_buildings() → OpenStreetMap geometry + tree inventory',
-      'get_weather_data() → EPW + urban canyon parameters',
-      'run_thermal_comfort_UTCI() → Infrared.city API',
-      'run_vegetation_cooling_ET() → Infrared.city API',
-      'zone_statistics() → baseline vs. enhanced delta',
-      'Synthesiser agent — ecosystem services quantification',
-      'Routing to AEC expert vegetation dashboard'
+      'Identifying your technical context — location, season and design objectives',
+      'Fetching building geometry and urban morphology data from OpenStreetMap',
+      'Loading EPW climate data — including hourly temperature, radiation and wind profiles',
+      'Running UTCI thermal comfort simulation across the 512 × 512 m analysis tile',
+      'Running solar radiation analysis — quantifying direct and diffuse irradiance at pedestrian level',
+      'Computing baseline statistics — UTCI distribution, heat-stress zones and priority areas',
+      'Quantifying spatial patterns — identifying zones with highest combined thermal and solar load',
+      'Routing to AEC technical analysis dashboard'
     ]
   }
 };
@@ -1427,6 +1400,12 @@ function drawMap(canvas, palKey, showTrees=false, showRoute=false) {
   c.beginPath(); c.roundRect(px+16,py-12,lw2,lh2,4); c.fill(); c.stroke();
   c.fillStyle = '#3a3628'; c.font = '11px DM Mono, monospace';
   c.fillText('Bryghuspladsen 8', px+22, py+4);
+
+  // Analysis tile label — bottom left
+  c.fillStyle = 'rgba(250,248,244,0.88)'; c.strokeStyle = 'rgba(180,176,164,0.5)'; c.lineWidth=0.5;
+  c.beginPath(); c.roundRect(10, h-26, 168, 18, 3); c.fill(); c.stroke();
+  c.fillStyle = 'rgba(58,54,40,0.55)'; c.font = '9.5px DM Mono, monospace';
+  c.fillText('Analysis tile · 512 × 512 m', 16, h-13);
 }
 
 function drawRaster(canvas, palKey, alpha=0.45) {
@@ -1445,9 +1424,11 @@ function drawRaster(canvas, palKey, alpha=0.45) {
 }
 
 function drawStreetView(canvas, immersive=false) {
-  const w = canvas.offsetWidth||440, h = canvas.offsetHeight||280;
+  const w = canvas.offsetWidth||520, h = canvas.offsetHeight||360;
   canvas.width = w; canvas.height = h;
   const c = canvas.getContext('2d');
+  // heading shifts the vanishing point left/right for turning effect
+  const turn = Math.sin((svHeading||0) * Math.PI/180) * w * 0.18;
   const vp = immersive ? 0.42 : 0.48;
 
   // Sky
@@ -1465,8 +1446,8 @@ function drawStreetView(canvas, immersive=false) {
   gnd.addColorStop(0,'#c8c0a8'); gnd.addColorStop(1,'#b0a890');
   c.fillStyle = gnd; c.fillRect(0,h*vp,w,h*(1-vp));
 
-  // Road perspective
-  const cx = w/2, far = h*vp, near = h;
+  // Road perspective — cx shifts with heading for turning effect
+  const cx = w/2 + (immersive ? turn : 0), far = h*vp, near = h;
   const rw_far = w*0.12, rw_near = w*0.5;
   c.fillStyle = '#a09880';
   c.beginPath(); c.moveTo(cx-rw_far,far); c.lineTo(cx+rw_far,far); c.lineTo(cx+rw_near,near); c.lineTo(cx-rw_near,near); c.closePath(); c.fill();
@@ -1516,12 +1497,17 @@ function drawStreetView(canvas, immersive=false) {
     c.fillStyle = `rgba(42,110,168,${0.06+t*0.18})`; c.fillRect(xi,h*vp,12,h*(1-vp));
   }
 
-  // Immersive crosshair
+  // Immersive crosshair + navigation hint
   if (immersive) {
     c.strokeStyle = 'rgba(255,255,255,0.5)'; c.lineWidth=1;
     c.beginPath(); c.moveTo(w/2-12,h/2); c.lineTo(w/2+12,h/2); c.stroke();
     c.beginPath(); c.moveTo(w/2,h/2-12); c.lineTo(w/2,h/2+12); c.stroke();
     c.beginPath(); c.arc(w/2,h/2,18,0,Math.PI*2); c.strokeStyle='rgba(255,255,255,0.2)'; c.stroke();
+    // Navigation hint bottom
+    c.fillStyle='rgba(12,21,32,0.55)';
+    c.beginPath(); c.roundRect(w/2-90,h-34,180,22,4); c.fill();
+    c.fillStyle='rgba(255,255,255,0.7)'; c.font='10px DM Mono,monospace'; c.textAlign='center';
+    c.fillText('← → turn  ↑ advance  ↓ back', w/2, h-19);
   }
 }
 
@@ -1532,7 +1518,7 @@ function drawRadar(canvas) {
   c.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--surface') || '#faf8f4';
   c.fillRect(0,0,w,h);
 
-  const cx = w/2, cy = h/2+8, R = Math.min(w,h)*0.36;
+  const cx = w/2, cy = h/2+10, R = Math.min(w,h)*0.33;
   const axes = ['Biomass\nDensity','Biodiversity\nAvailability','CO₂\nSequestration','Climate\nRegulation','Air\nQuality','Human\nWell-being'];
   const N = axes.length;
   const baseline = [0.22, 0.18, 0.14, 0.20, 0.32, 0.25];
@@ -1568,11 +1554,11 @@ function drawRadar(canvas) {
   // Dots
   enhanced.forEach((v,i)=>{ const a=angle(i); c.beginPath(); c.arc(cx+R*v*Math.cos(a),cy+R*v*Math.sin(a),3.5,0,Math.PI*2); c.fillStyle='#2a8a5a'; c.fill(); });
 
-  // Labels
+  // Labels — wider offset and larger font so no clipping
   axes.forEach((label,i) => {
-    const a=angle(i), lx=cx+(R+28)*Math.cos(a), ly=cy+(R+28)*Math.sin(a);
-    c.fillStyle='rgba(60,55,40,0.55)'; c.font='9px DM Mono,monospace'; c.textAlign='center';
-    label.split('\n').forEach((line,li,arr) => c.fillText(line, lx, ly+(li-arr.length/2+0.5)*11));
+    const a=angle(i), lx=cx+(R+38)*Math.cos(a), ly=cy+(R+38)*Math.sin(a);
+    c.fillStyle='rgba(60,55,40,0.65)'; c.font='10px DM Mono,monospace'; c.textAlign='center';
+    label.split('\n').forEach((line,li,arr) => c.fillText(line, lx, ly+(li-arr.length/2+0.5)*13));
   });
 }
 
@@ -1588,11 +1574,19 @@ function initSH() {
       rc.style.opacity = '0.45';
     });
   });
-  later(280, () => document.getElementById('sh-bar').style.width = '72%');
-  ['sh-k0','sh-k1','sh-k2','sh-k3','sh-k4','sh-k5','sh-k6','sh-k7'].forEach((id,i) => later(350+i*100, () => document.getElementById(id).classList.add('vis')));
-  ['sh-cs0','sh-cs1','sh-cs2'].forEach((id,i) => later(900+i*150, () => document.getElementById(id).classList.add('vis')));
-  ['sh-bm0','sh-bm1','sh-bm2','sh-bm3'].forEach((id,i) => later(1250+i*120, () => document.getElementById(id).classList.add('vis')));
-  ['sh-r0','sh-r1','sh-r2','sh-r3'].forEach((id,i) => later(1700+i*180, () => document.getElementById(id).classList.add('vis')));
+  later(280, () => document.getElementById('sh-bar').style.width = '42%');
+  ['sh-k0','sh-k1','sh-k2','sh-k3'].forEach((id,i) => later(350+i*120, () => {
+    const el = document.getElementById(id); if (el) el.classList.add('vis');
+  }));
+  ['sh-cs0','sh-cs1','sh-cs2'].forEach((id,i) => later(800+i*150, () => {
+    const el = document.getElementById(id); if (el) el.classList.add('vis');
+  }));
+  ['sh-bm0','sh-bm1','sh-bm2','sh-bm3'].forEach((id,i) => later(1150+i*120, () => {
+    const el = document.getElementById(id); if (el) el.classList.add('vis');
+  }));
+  ['sh-r0','sh-r1','sh-r2','sh-r3'].forEach((id,i) => later(1550+i*180, () => {
+    const el = document.getElementById(id); if (el) el.classList.add('vis');
+  }));
 }
 
 function shSim(el, sim) {
@@ -1620,21 +1614,65 @@ function initCT() {
   ['ct-s0','ct-s1','ct-s2','ct-s3','ct-s4','ct-s5','ct-s6'].forEach((id,i) => later(700+i*90, () => document.getElementById(id).classList.add('vis')));
 }
 
+// UTCI comfort classification for street view
+const UTCI_LEVELS = [
+  { max:  9, label: 'Very cold — seek shelter or warm spaces nearby', cls: 'rq-bad' },
+  { max: 26, label: 'Comfortable — great conditions for being outside', cls: 'rq-good' },
+  { max: 32, label: 'Warm — find shade when you can, stay hydrated', cls: 'rq-mid' },
+  { max: 38, label: 'Hot — limit time in direct sun, seek shaded streets', cls: 'rq-bad' },
+  { max: Infinity, label: 'Extreme heat — move to a cool, shaded or indoor space', cls: 'rq-bad' },
+];
+
+function utciWalkMsg(utci) {
+  for (const lvl of UTCI_LEVELS) { if (utci < lvl.max) return lvl.label; }
+  return '';
+}
+
+let svHeading = 0; // current view heading in degrees
+let svStep = 0;    // forward progress for perspective shift
+
 function toggleWalk() {
   walkMode = !walkMode;
   const btn = document.getElementById('sv-enter-btn');
   const sv = document.getElementById('sv-canvas');
-  drawStreetView(sv, walkMode);
   if (walkMode) {
-    btn.textContent = '⊙ Walking — move to improve comfort';
+    const utci = parseFloat(document.getElementById('ct-env-val')?.textContent) || 26;
+    const msg = utciWalkMsg(utci);
+    btn.innerHTML = '⊙ Walking — ' + msg;
     btn.classList.add('active');
-    sv.style.transition = 'transform 0.5s ease';
-    sv.style.transform = 'scale(1.03)';
+    sv.style.cursor = 'crosshair';
+    drawStreetView(sv, true);
+    // Keyboard navigation
+    if (!window._svKeysBound) {
+      window._svKeysBound = true;
+      document.addEventListener('keydown', svKeyNav);
+    }
   } else {
-    btn.textContent = '👁 Enter space';
+    btn.innerHTML = '📍 Explore this space';
     btn.classList.remove('active');
-    sv.style.transform = '';
+    sv.style.cursor = '';
+    svHeading = 0; svStep = 0;
+    drawStreetView(sv, false);
   }
+}
+
+function svKeyNav(e) {
+  if (!walkMode) return;
+  const sv = document.getElementById('sv-canvas');
+  if (e.key === 'ArrowLeft')  { svHeading = (svHeading - 15 + 360) % 360; drawStreetView(sv, true); }
+  if (e.key === 'ArrowRight') { svHeading = (svHeading + 15) % 360; drawStreetView(sv, true); }
+  if (e.key === 'ArrowUp')    { svStep = (svStep + 1) % 4; drawStreetView(sv, true); }
+  if (e.key === 'ArrowDown')  { svStep = Math.max(0, svStep - 1); drawStreetView(sv, true); }
+  const compass = ['N','NE','E','SE','S','SW','W','NW'];
+  document.querySelector('.sv-compass').textContent = '🧭 ' + compass[Math.round(svHeading/45)%8];
+}
+
+function requestGPS() {
+  if (!navigator.geolocation) { alert('Geolocation not available in this browser.'); return; }
+  navigator.geolocation.getCurrentPosition(pos => {
+    const lbl = document.getElementById('sv-location-lbl');
+    if (lbl) lbl.textContent = '📍 Your location · ' + pos.coords.latitude.toFixed(4) + '°N';
+  }, () => alert('Could not get your location — please check browser permissions.'));
 }
 
 function ctTab(el, panel) {

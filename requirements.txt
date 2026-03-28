@@ -21,3 +21,10 @@ pandas>=2.0.0
 
 # GeoViews coordinate transforms (Web Mercator projection for map tiles)
 pyproj>=3.5.0
+
+panel 
+holoviews 
+geoviews 
+hvplot 
+bokeh 
+pyproj 

@@ -102,6 +102,18 @@ _KW = {
                     "ladybug","rhino","placement","cooling","urban morphology","infrared"},
 }
 
+_ROUTE_KW = {
+    "walk","route","walking","stroll","path","where","find","go","outside","take",
+    "cycling","bike","run","jog","shade","shaded","kids","children","afternoon",
+    "today","now","direction","streets","comfortable","safest","coolest","best route",
+    "best street","best area","good place","safe","my kids","my children",
+}
+
+def _is_route_prompt(text: str) -> bool:
+    """Return True when the prompt is asking about where/how to walk or move."""
+    p = text.lower()
+    return any(w in p for w in _ROUTE_KW)
+
 def _detect_user_type(text: str) -> str:
     p = text.lower()
     scores = {ut: sum(1 for w in kws if w in p) for ut, kws in _KW.items()}
@@ -151,6 +163,7 @@ class AppState(param.Parameterized):
     tci_grid      = param.Array(default=None, allow_None=True)
     active_sim    = param.Selector(default="TCI", objects=["TCI","SR"])
     ai_result     = param.Dict(default={})
+    walk_mode     = param.Boolean(default=False)   # True when prompt is about a route/walk
 
 state = AppState()
 
@@ -236,7 +249,8 @@ def run_pipeline():
         season_str            = plan_data.get("season", "summer")
         sm, em, sh, eh        = SEASON_MONTHS.get(season_str, SEASON_MONTHS["summer"])
 
-        _s(plan=plan_data, user_type=ut, detected_type=ut)
+        walk = ut == "citizen" and _is_route_prompt(prompt)
+        _s(plan=plan_data, user_type=ut, detected_type=ut, walk_mode=walk)
 
         # Step 1 — location + buildings
         _s(status_idx=1, status_pct=12)
@@ -343,8 +357,8 @@ def run_pipeline():
 # MAP — reactive, analysis-aware
 # ══════════════════════════════════════════════════════════════════════════════
 @pn.depends(state.param.active_sim, state.param.tci_grid, state.param.sr_grid,
-            state.param.user_type, state.param.lat, state.param.lon)
-def _map_pane(active_sim, tci_grid, sr_grid, user_type, lat, lon):
+            state.param.user_type, state.param.lat, state.param.lon, state.param.walk_mode)
+def _map_pane(active_sim, tci_grid, sr_grid, user_type, lat, lon, walk_mode):
     ld = 256/111320
     lo = 256/(111320*math.cos(math.radians(lat)))
     bounds = (lon-lo, lat-ld, lon+lo, lat+ld)
@@ -365,7 +379,44 @@ def _map_pane(active_sim, tci_grid, sr_grid, user_type, lat, lon):
             clim=(0, 2), alpha=0.50, colorbar=False,
             tools=["hover"], **base_opts,
         )
-        return pn.pane.HoloViews(tiles * img, sizing_mode="stretch_both")
+        overlay = tiles * img
+
+        # Walk mode: overlay a "coolest path" route through the tile
+        if walk_mode:
+            n_pts = 28
+            rows  = np.linspace(0, 511, n_pts, dtype=int)
+            path_lons, path_lats = [], []
+            prev_col = 256
+            for r in rows:
+                row_data = tci_grid[r, :]
+                # Search within a ±100 col window around the previous point
+                lo2 = max(0,   prev_col - 100)
+                hi2 = min(512, prev_col + 100)
+                window = np.full(512, np.nan)
+                window[lo2:hi2] = row_data[lo2:hi2]
+                valid = ~np.isnan(window)
+                best_col = int(np.nanargmin(window)) if valid.any() else prev_col
+                prev_col = best_col
+                path_lons.append((lon - lo) + (best_col / 511) * 2 * lo)
+                path_lats.append((lat - ld) + (r     / 511) * 2 * ld)
+            # Smooth the horizontal wander
+            k = np.ones(7) / 7
+            path_lons = np.convolve(path_lons, k, mode="same").tolist()
+            pts = np.column_stack([path_lons, path_lats])
+            route = gv.Path([pts], kdims=["Longitude","Latitude"]).opts(
+                color="#2a6ea8", line_width=4, alpha=0.90, **base_opts,
+            )
+            start = gv.Points([(path_lons[0],  path_lats[0])],
+                              kdims=["Longitude","Latitude"]).opts(
+                color="#1c4a8a", size=12, marker="circle", **base_opts,
+            )
+            end = gv.Points([(path_lons[-1], path_lats[-1])],
+                            kdims=["Longitude","Latitude"]).opts(
+                color="#2a8a5a", size=12, marker="circle", **base_opts,
+            )
+            overlay = overlay * route * start * end
+
+        return pn.pane.HoloViews(overlay, sizing_mode="stretch_both")
 
     # ── Stakeholder: TCI heatmap + priority zone (orange) ─────────────────────
     if user_type == "stakeholder":
@@ -506,6 +557,7 @@ def _on_run(event):
     state.sr_grid      = None
     state.tci_grid     = None
     state.ai_result    = {}
+    state.walk_mode    = False
     threading.Thread(target=run_pipeline, daemon=True).start()
 
 run_btn.on_click(_on_run)
@@ -844,37 +896,92 @@ def _build_stakeholder():
 # ══════════════════════════════════════════════════════════════════════════════
 # CITIZEN DASHBOARD — plain-language comfort view, no technical numbers
 # ══════════════════════════════════════════════════════════════════════════════
+
+# Illustrative street-perspective canvas shown in walk/route mode
+_STREET_VIEW_JS = """
+<style>#sv-cv{width:100%;height:100%;display:block}</style>
+<canvas id="sv-cv"></canvas>
+<script>
+(function(){
+function draw(){
+  var cv=document.getElementById('sv-cv');if(!cv)return;
+  var w=cv.offsetWidth||420,h=cv.offsetHeight||190;cv.width=w;cv.height=h;
+  var c=cv.getContext('2d'),vp=0.46;
+  var sky=c.createLinearGradient(0,0,0,h*vp);
+  sky.addColorStop(0,'#7090c0');sky.addColorStop(1,'#9abcda');
+  c.fillStyle=sky;c.fillRect(0,0,w,h*vp);
+  var gnd=c.createLinearGradient(0,h*vp,0,h);
+  gnd.addColorStop(0,'#c8c0a8');gnd.addColorStop(1,'#b0a890');
+  c.fillStyle=gnd;c.fillRect(0,h*vp,w,h);
+  var cx=w/2,rwf=w*0.10,rwn=w*0.46,far=h*vp,near=h;
+  c.fillStyle='#a09880';c.beginPath();
+  c.moveTo(cx-rwf,far);c.lineTo(cx+rwf,far);
+  c.lineTo(cx+rwn,near);c.lineTo(cx-rwn,near);c.closePath();c.fill();
+  c.strokeStyle='rgba(255,255,255,0.45)';c.lineWidth=1.5;c.setLineDash([14,10]);
+  c.beginPath();c.moveTo(cx,far+2);c.lineTo(cx,near);c.stroke();c.setLineDash([]);
+  [[0,0.04,0.26,vp*1.12],[0.02,0.07,0.20,vp*1.06]].forEach(function(d){
+    var g=c.createLinearGradient(d[0]*w,0,(d[0]+d[2])*w,0);
+    g.addColorStop(0,'#d8d0bc');g.addColorStop(1,'#c8c0aa');
+    c.fillStyle=g;c.fillRect(d[0]*w,d[1]*h,d[2]*w,d[3]*h);});
+  [[0.74,0.05,0.26,vp*1.08]].forEach(function(d){
+    var g=c.createLinearGradient(d[0]*w,0,(d[0]+d[2])*w,0);
+    g.addColorStop(0,'#c8c0aa');g.addColorStop(1,'#d8d0bc');
+    c.fillStyle=g;c.fillRect(d[0]*w,d[1]*h,d[2]*w,d[3]*h);});
+  [0.25,0.19,0.32].forEach(function(tx){
+    var ty=vp+0.035,tr=0.048;
+    var g2=c.createRadialGradient(tx*w,ty*h,0,tx*w,ty*h,tr*w);
+    g2.addColorStop(0,'rgba(55,130,55,0.92)');g2.addColorStop(1,'rgba(55,130,55,0)');
+    c.fillStyle=g2;c.beginPath();c.arc(tx*w,ty*h,tr*w,0,Math.PI*2);c.fill();
+    c.fillStyle='rgba(70,50,30,0.55)';c.fillRect(tx*w-2,ty*h,4,h*(1-vp)*0.18);});
+  c.fillStyle='rgba(10,18,30,0.52)';
+  if(c.roundRect)c.roundRect(w/2-90,h-30,180,20,4);else c.rect(w/2-90,h-30,180,20);
+  c.fill();
+  c.fillStyle='rgba(255,255,255,0.65)';c.font='9px monospace';c.textAlign='center';
+  c.fillText('Suggested comfortable route',w/2,h-17);
+}
+window.addEventListener('load',draw);window.addEventListener('resize',draw);draw();
+})();
+</script>
+"""
+
 def _build_citizen():
-    ai  = state.ai_result or {}
-    tci = state.tci_grid
+    ai        = state.ai_result or {}
+    tci       = state.tci_grid
+    walk_mode = state.walk_mode
     def _v(a): return a[~np.isnan(a)] if a is not None else np.array([])
     tv  = _v(tci)
     acc, bg2, bg3 = ACCENT["citizen"]
 
-    avg_tci_f    = float(np.mean(tv))     if tv.size else 26.0
-    pct_comf     = float(100*(tv<26).sum()/tv.size) if tv.size else 50.0
-    pct_hot      = float(100*(tv>32).sum()/tv.size) if tv.size else 20.0
-    summary      = ai.get("summary", "")
-    recs         = ai.get("recommendations", [])
+    avg_tci_f = float(np.mean(tv)) if tv.size else 26.0
+    summary   = ai.get("summary", "")
+    recs      = ai.get("recommendations", [])
 
     # Comfort status — three states, zero jargon
     if avg_tci_f < 26:
         st_icon, st_color, st_bg = "\U0001f7e2", "#2a8a5a", "rgba(42,138,90,0.07)"
         st_label = "Great conditions to be outside"
-        st_desc  = (f"Most of the area is comfortable right now \u2014 "
-                    f"green zones on the map are the most pleasant spots to walk or sit.")
+        st_desc  = ("Green zones on the map are the most comfortable streets to walk. "
+                    "The blue line shows the coolest suggested route through the area."
+                    if walk_mode else
+                    "Most of the area is comfortable right now \u2014 "
+                    "green zones on the map are the most pleasant spots to walk or sit.")
     elif avg_tci_f < 32:
         st_icon, st_color, st_bg = "\U0001f7e1", "#c86a20", "rgba(200,106,32,0.07)"
         st_label = "Warm \u2014 stick to the green areas"
-        st_desc  = (f"It's warm outside. Look for the green zones on the map \u2014 "
-                    f"those are the shadier, cooler streets. Avoid yellow and red areas "
-                    f"during the hottest part of the day.")
+        st_desc  = ("The blue route on the map follows the coolest available streets. "
+                    "Avoid yellow and red areas, especially between 11:00 and 15:00."
+                    if walk_mode else
+                    "Look for the green zones on the map \u2014 "
+                    "those are the shadier, cooler streets. Avoid yellow and red areas "
+                    "during the hottest part of the day.")
     else:
         st_icon, st_color, st_bg = "\U0001f534", "#c0352a", "rgba(192,53,42,0.07)"
         st_label = "Hot \u2014 limit time outside"
-        st_desc  = (f"It\u2019s quite hot. Red areas on the map are uncomfortable for children "
-                    f"and elderly people. If you go out, keep to shaded streets shown in green "
-                    f"and bring water.")
+        st_desc  = ("The route shown follows the least-hot streets available, "
+                    "but conditions are still uncomfortable. Keep visits short and bring water."
+                    if walk_mode else
+                    "Red areas on the map are uncomfortable for children and elderly people. "
+                    "If you go out, keep to shaded streets shown in green and bring water.")
 
     recs_html = "".join(
         f'<div style="display:flex;gap:.8rem;padding:.75rem 0;border-bottom:1px solid var(--border)">'
@@ -884,34 +991,47 @@ def _build_citizen():
         for i, r in enumerate(recs[:3])
     )
 
+    # Street view pane — shown only in walk/route mode
+    sv_pane = pn.pane.HTML(
+        _STREET_VIEW_JS,
+        sizing_mode="stretch_width",
+        styles={"height":"190px","background":"#0c1520",
+                "border-bottom":"1px solid var(--border2)"},
+    ) if walk_mode else None
+
+    status_block = _h(
+        f'<div style="padding:1.2rem 1.4rem 1rem;background:{st_bg};'
+        f'border-bottom:1px solid var(--border)">'
+        f'<div style="display:flex;align-items:flex-start;gap:.9rem;margin-bottom:.55rem">'
+        f'<span style="font-size:2rem;line-height:1">{st_icon}</span>'
+        f'<div><div style="font-size:16px;font-weight:600;color:{st_color};line-height:1.2">'
+        f'{st_label}</div>'
+        f'<div style="font-family:\'DM Mono\',monospace;font-size:9px;color:var(--muted);'
+        f'letter-spacing:.08em;text-transform:uppercase;margin-top:4px">'
+        f'\U0001f4cd {state.address_str}</div></div></div>'
+        f'<div style="font-size:12.5px;color:var(--ink2);line-height:1.65">{st_desc}</div>'
+        f'</div>'
+    )
+
+    inner = pn.Column(
+        _h(f'<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;letter-spacing:.14em;'
+           f'text-transform:uppercase;color:var(--muted);margin-bottom:.5rem;'
+           f'padding-bottom:.35rem;border-bottom:1px solid var(--border)">About this area</div>'
+           f'<div style="font-size:13px;color:var(--muted);line-height:1.75;margin-bottom:1.1rem">'
+           f'{summary}</div>'
+           f'<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;letter-spacing:.14em;'
+           f'text-transform:uppercase;color:var(--muted);margin-bottom:.3rem;'
+           f'padding-bottom:.35rem;border-bottom:1px solid var(--border)">'
+           f'{"Route tips" if walk_mode else "Tips for your visit"}</div>'
+           f'{recs_html}'),
+        pn.Column(_new_analysis_btn(acc), styles={"padding":"1rem 0 1.5rem"}),
+        sizing_mode="stretch_width",
+        styles={"overflow-y":"auto","flex":"1","padding":"1rem 1.4rem"},
+    )
+
+    panel_children = ([sv_pane] if sv_pane else []) + [status_block, inner]
     right = pn.Column(
-        # Status block — big, clear, no numbers
-        _h(f'<div style="padding:1.4rem 1.4rem 1.1rem;background:{st_bg};'
-           f'border-bottom:1px solid var(--border)">'
-           f'<div style="display:flex;align-items:flex-start;gap:.9rem;margin-bottom:.65rem">'
-           f'<span style="font-size:2.2rem;line-height:1">{st_icon}</span>'
-           f'<div><div style="font-size:17px;font-weight:600;color:{st_color};line-height:1.2">'
-           f'{st_label}</div>'
-           f'<div style="font-family:\'DM Mono\',monospace;font-size:9px;color:var(--muted);'
-           f'letter-spacing:.08em;text-transform:uppercase;margin-top:4px">'
-           f'\U0001f4cd {state.address_str}</div></div></div>'
-           f'<div style="font-size:13px;color:var(--ink2);line-height:1.65">{st_desc}</div>'
-           f'</div>'),
-        # AI summary + recommendations
-        pn.Column(
-            _h(f'<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;letter-spacing:.14em;'
-               f'text-transform:uppercase;color:var(--muted);margin-bottom:.5rem;'
-               f'padding-bottom:.35rem;border-bottom:1px solid var(--border)">About this area</div>'
-               f'<div style="font-size:13px;color:var(--muted);line-height:1.75;margin-bottom:1.1rem">'
-               f'{summary}</div>'
-               f'<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;letter-spacing:.14em;'
-               f'text-transform:uppercase;color:var(--muted);margin-bottom:.3rem;'
-               f'padding-bottom:.35rem;border-bottom:1px solid var(--border)">Tips for your visit</div>'
-               f'{recs_html}'),
-            pn.Column(_new_analysis_btn(acc), styles={"padding":"1rem 0 1.5rem"}),
-            sizing_mode="stretch_width",
-            styles={"overflow-y":"auto","flex":"1","padding":"1rem 1.4rem"},
-        ),
+        *panel_children,
         sizing_mode="stretch_width",
         styles={**_PANEL_STYLES,"flex":"0 0 380px","width":"380px"},
     )

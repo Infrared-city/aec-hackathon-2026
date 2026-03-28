@@ -351,55 +351,77 @@ def _map_pane(active_sim, tci_grid, sr_grid, user_type, lat, lon):
     base_opts = dict(width=600, height=500, xaxis=None, yaxis=None)
     tiles = gvts.CartoLight().opts(**base_opts)
 
-    # Citizen: always TCI with intuitive comfort colormap
+    # ── Citizen: 3-zone categorical comfort map — NO scientific colorbar ───────
     if user_type == "citizen":
-        grid   = tci_grid
-        cmap   = "RdYlGn_r"
-        clabel = "°C UTCI — green = comfortable · red = heat stress"
-        vmin, vmax = 9.0, 42.0
-    elif active_sim == "SR":
+        if tci_grid is None:
+            return pn.pane.HoloViews(tiles, sizing_mode="stretch_both")
+        # Encode comfort zones: 0=comfortable, 1=warm, 2=hot
+        cat = np.where(tci_grid < 26, 0.0,
+              np.where(tci_grid < 32, 1.0, 2.0))
+        cat[np.isnan(tci_grid)] = np.nan
+        img = gv.Image(np.flipud(cat), bounds=bounds,
+                       kdims=["Longitude","Latitude"], vdims=["comfort"]).opts(
+            cmap=["#4a9050", "#e8a020", "#c0352a"],
+            clim=(0, 2), alpha=0.50, colorbar=False,
+            tools=["hover"], **base_opts,
+        )
+        return pn.pane.HoloViews(tiles * img, sizing_mode="stretch_both")
+
+    # ── Stakeholder: TCI heatmap + priority zone (orange) ─────────────────────
+    if user_type == "stakeholder":
+        grid = tci_grid if tci_grid is not None else sr_grid
+        if grid is None:
+            return pn.pane.HoloViews(tiles, sizing_mode="stretch_both")
+        valid = grid[~np.isnan(grid)]
+        vmin = float(np.percentile(valid, 2))  if valid.size else 0
+        vmax = float(np.percentile(valid, 98)) if valid.size else 1
+        img = gv.Image(np.flipud(tci_grid if tci_grid is not None else grid), bounds=bounds,
+                       kdims=["Longitude","Latitude"], vdims=["value"]).opts(
+            cmap="YlOrRd", alpha=0.55, clim=(vmin, vmax),
+            colorbar=True, colorbar_opts={"title": "\u00b0C UTCI \u2014 heat stress"},
+            tools=["hover"], **base_opts,
+        )
+        overlay = tiles * img
+        # Priority zone: top-30th-pct TCI ∩ SR combined
+        if tci_grid is not None and sr_grid is not None:
+            tf = tci_grid.flatten(); sf = sr_grid.flatten()
+            mask = ~(np.isnan(tf) | np.isnan(sf))
+            if mask.sum() > 0:
+                tt = float(np.percentile(tf[mask], 70))
+                st = float(np.percentile(sf[mask], 70))
+                pz = np.where((tci_grid >= tt) & (sr_grid >= st), 1.0, np.nan)
+                pz_img = gv.Image(np.flipud(pz), bounds=bounds,
+                                  kdims=["Longitude","Latitude"], vdims=["pz"]).opts(
+                    cmap=["rgba(200,96,26,0.0)", "rgba(200,96,26,0.45)"],
+                    clim=(0, 1), alpha=1, colorbar=False, tools=[], **base_opts,
+                )
+                overlay = overlay * pz_img
+        return pn.pane.HoloViews(overlay, sizing_mode="stretch_both")
+
+    # ── AEC: full technical raster, togglable TCI / SR ────────────────────────
+    if active_sim == "SR":
         grid   = sr_grid
         cmap   = "YlOrBr"
-        clabel = "kWh/m² — Solar radiation"
-        vmin, vmax = None, None
+        clabel = "kWh/m\u00b2 \u2014 Solar irradiance"
     else:
         grid   = tci_grid
         cmap   = "YlOrRd"
-        clabel = "°C UTCI — Thermal comfort index"
-        vmin, vmax = None, None
+        clabel = "\u00b0C UTCI \u2014 Thermal comfort index"
 
     if grid is None:
         return pn.pane.HoloViews(tiles, sizing_mode="stretch_both")
 
-    arr   = np.flipud(grid)
-    valid = arr[~np.isnan(arr)]
-    if vmin is None:
-        vmin = float(np.percentile(valid, 2))  if valid.size else 0
-        vmax = float(np.percentile(valid, 98)) if valid.size else 1
+    valid = grid[~np.isnan(grid)]
+    vmin = float(np.percentile(valid, 2))  if valid.size else 0
+    vmax = float(np.percentile(valid, 98)) if valid.size else 1
 
-    img = gv.Image(arr, bounds=bounds, kdims=["Longitude","Latitude"], vdims=["value"]).opts(
-        cmap=cmap, alpha=0.55, clim=(vmin, vmax),
+    img = gv.Image(np.flipud(grid), bounds=bounds,
+                   kdims=["Longitude","Latitude"], vdims=["value"]).opts(
+        cmap=cmap, alpha=0.60, clim=(vmin, vmax),
         colorbar=True, colorbar_opts={"title": clabel},
         tools=["hover"], **base_opts,
     )
-    overlay = tiles * img
-
-    # Stakeholder: add priority zone overlay (top-30th-pct TCI ∩ SR)
-    if user_type == "stakeholder" and tci_grid is not None and sr_grid is not None:
-        tf = tci_grid.flatten(); sf = sr_grid.flatten()
-        mask = ~(np.isnan(tf) | np.isnan(sf))
-        if mask.sum() > 0:
-            tt = float(np.percentile(tf[mask], 70))
-            st = float(np.percentile(sf[mask], 70))
-            pz = np.where((tci_grid >= tt) & (sr_grid >= st), 1.0, np.nan)
-            pz_img = gv.Image(np.flipud(pz), bounds=bounds,
-                              kdims=["Longitude","Latitude"], vdims=["pz"]).opts(
-                cmap=["rgba(200,96,26,0.0)","rgba(200,96,26,0.40)"],
-                clim=(0, 1), alpha=1, colorbar=False, tools=[], **base_opts,
-            )
-            overlay = overlay * pz_img
-
-    return pn.pane.HoloViews(overlay, sizing_mode="stretch_both")
+    return pn.pane.HoloViews(tiles * img, sizing_mode="stretch_both")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PROMPT SCREEN
@@ -656,6 +678,11 @@ def _topbar():
     ut = state.user_type
     acc, bg2, _ = ACCENT[ut]
     lbl = {"stakeholder":"\U0001f3db Stakeholder","citizen":"\U0001f6b6 Citizen","aec":"\U0001f4d0 AEC Expert"}[ut]
+    subtitle = {
+        "citizen":     "Outdoor comfort guide",
+        "stakeholder": "Environmental Performance Assessment",
+        "aec":         "Technical Analysis Dashboard",
+    }[ut]
     new_btn = pn.widgets.Button(name="+ New analysis", button_type="default", stylesheets=["""
       :host button { background:var(--ink,#1c1a14);color:var(--bg,#f5f2ec);border:none;
         border-radius:7px;padding:6px 14px;font-family:'Instrument Sans',sans-serif;
@@ -669,7 +696,7 @@ def _topbar():
         _h('city<em style="font-style:italic">Agent</em>', styles={"font-family":"Fraunces,serif",
            "font-size":"1.1rem","font-weight":"200","letter-spacing":"-.02em"}),
         _h('<div style="width:1px;height:18px;background:var(--border2);margin:0 .5rem;align-self:center"></div>'
-           f'<div style="font-size:12px;color:var(--muted);flex:1">{state.address_str} \u00b7 Environmental Analysis</div>'),
+           f'<div style="font-size:12px;color:var(--muted);flex:1">{state.address_str} \u00b7 {subtitle}</div>'),
         _h(f'<div style="display:flex;align-items:center;gap:.5rem;padding:4px 12px;border-radius:999px;'
            f'border:1px solid {acc};font-family:\'DM Mono\',monospace;font-size:10px;font-weight:500;'
            f'letter-spacing:.06em;text-transform:uppercase;color:{acc};background:{bg2}">{lbl}</div>'),
@@ -815,226 +842,105 @@ def _build_stakeholder():
     )
 
 # ══════════════════════════════════════════════════════════════════════════════
-# CITIZEN DASHBOARD
+# CITIZEN DASHBOARD — plain-language comfort view, no technical numbers
 # ══════════════════════════════════════════════════════════════════════════════
-_STREET_VIEW_JS = """
-<style>#sv-canvas{width:100%;height:100%;display:block;cursor:crosshair}</style>
-<canvas id="sv-canvas"></canvas>
-<script>
-var _svH=0,_svS=0,_svWalk=false;
-function _drawSV(){
-  var cv=document.getElementById('sv-canvas');if(!cv)return;
-  var w=cv.offsetWidth||520,h=cv.offsetHeight||300;cv.width=w;cv.height=h;
-  var c=cv.getContext('2d'),turn=Math.sin(_svH*Math.PI/180)*w*0.18;
-  var vp=_svWalk?0.42:0.48;
-  var sky=c.createLinearGradient(0,0,0,h*vp);sky.addColorStop(0,'#6080b0');sky.addColorStop(1,'#8aaccf');
-  c.fillStyle=sky;c.fillRect(0,0,w,h*vp);
-  var gnd=c.createLinearGradient(0,h*vp,0,h);gnd.addColorStop(0,'#c8c0a8');gnd.addColorStop(1,'#b0a890');
-  c.fillStyle=gnd;c.fillRect(0,h*vp,w,h);
-  var cx=w/2+(_svWalk?turn:0),far=h*vp,near=h,rwf=w*0.12,rwn=w*0.5;
-  c.fillStyle='#a09880';c.beginPath();c.moveTo(cx-rwf,far);c.lineTo(cx+rwf,far);
-  c.lineTo(cx+rwn,near);c.lineTo(cx-rwn,near);c.closePath();c.fill();
-  c.strokeStyle='rgba(255,255,255,0.5)';c.lineWidth=2;c.setLineDash([16,12]);
-  c.beginPath();c.moveTo(cx,far+4);c.lineTo(cx,near);c.stroke();c.setLineDash([]);
-  [[0,0.05,0.28,vp*1.15],[0.02,0.08,0.22,vp*1.1]].forEach(function(d){
-    var g=c.createLinearGradient(d[0]*w,0,(d[0]+d[2])*w,0);
-    g.addColorStop(0,'#d8d0bc');g.addColorStop(1,'#c8c0aa');
-    c.fillStyle=g;c.fillRect(d[0]*w,d[1]*h,d[2]*w,d[3]*h);
-    c.strokeStyle='rgba(150,140,120,0.4)';c.lineWidth=0.5;
-    c.strokeRect(d[0]*w,d[1]*h,d[2]*w,d[3]*h);});
-  [[0.72,0.06,0.28,vp*1.1]].forEach(function(d){
-    var g=c.createLinearGradient(d[0]*w,0,(d[0]+d[2])*w,0);
-    g.addColorStop(0,'#c8c0aa');g.addColorStop(1,'#d8d0bc');
-    c.fillStyle=g;c.fillRect(d[0]*w,d[1]*h,d[2]*w,d[3]*h);
-    c.strokeStyle='rgba(150,140,120,0.4)';c.lineWidth=0.5;
-    c.strokeRect(d[0]*w,d[1]*h,d[2]*w,d[3]*h);});
-  [0.26,0.20,0.31].forEach(function(tx){
-    var ty=vp+0.04,tr=0.055;
-    var g2=c.createRadialGradient(tx*w,ty*h,0,tx*w,ty*h,tr*w);
-    g2.addColorStop(0,'rgba(60,140,60,0.9)');g2.addColorStop(1,'rgba(60,140,60,0)');
-    c.fillStyle=g2;c.beginPath();c.arc(tx*w,ty*h,tr*w,0,Math.PI*2);c.fill();
-    c.fillStyle='rgba(80,60,40,0.6)';c.fillRect(tx*w-2,ty*h,4,h*(1-vp)*0.2);});
-  if(_svWalk){
-    c.strokeStyle='rgba(255,255,255,0.5)';c.lineWidth=1;
-    c.beginPath();c.moveTo(w/2-12,h/2);c.lineTo(w/2+12,h/2);c.stroke();
-    c.beginPath();c.moveTo(w/2,h/2-12);c.lineTo(w/2,h/2+12);c.stroke();
-    c.fillStyle='rgba(12,21,32,0.55)';c.beginPath();c.roundRect(w/2-96,h-34,192,22,4);c.fill();
-    c.fillStyle='rgba(255,255,255,0.7)';c.font='10px DM Mono,monospace';c.textAlign='center';
-    c.fillText('\u2190 \u2192 turn  \u2191 advance  \u2193 back',w/2,h-19);}
-}
-window.addEventListener('load',function(){_drawSV();});
-window.addEventListener('resize',_drawSV);
-document.addEventListener('keydown',function(e){
-  if(!_svWalk)return;
-  if(e.key==='ArrowLeft'){_svH=(_svH-15+360)%360;_drawSV();}
-  if(e.key==='ArrowRight'){_svH=(_svH+15)%360;_drawSV();}
-  if(e.key==='ArrowUp'){_svS=(_svS+1)%4;_drawSV();}
-  if(e.key==='ArrowDown'){_svS=Math.max(0,_svS-1);_drawSV();}
-});
-</script>
-"""
-
-def _utci_msg(utci_val):
-    if utci_val < 9:   return "Very cold outside \u2014 dress warmly and seek shelter if needed"
-    if utci_val < 26:  return "Comfortable conditions \u2014 great time to be outside"
-    if utci_val < 32:  return "It feels warm \u2014 seek shade when you can, stay hydrated"
-    if utci_val < 38:  return "It\u2019s quite hot \u2014 limit time in direct sun, especially for children"
-    return "Extreme heat \u2014 find a cool, shaded or air-conditioned space"
-
 def _build_citizen():
     ai  = state.ai_result or {}
-    tci = state.tci_grid; sr = state.sr_grid
+    tci = state.tci_grid
     def _v(a): return a[~np.isnan(a)] if a is not None else np.array([])
-    tv, sv = _v(tci), _v(sr)
+    tv  = _v(tci)
     acc, bg2, bg3 = ACCENT["citizen"]
 
-    avg_tci_f = float(np.mean(tv)) if tv.size else 26.0
-    avg_sr_f  = float(np.mean(sv)) if sv.size else 5.0
-    summary   = ai.get("summary","")
-    recs      = ai.get("recommendations",[])
-    utci_msg  = _utci_msg(avg_tci_f)
+    avg_tci_f    = float(np.mean(tv))     if tv.size else 26.0
+    pct_comf     = float(100*(tv<26).sum()/tv.size) if tv.size else 50.0
+    pct_hot      = float(100*(tv>32).sum()/tv.size) if tv.size else 20.0
+    summary      = ai.get("summary", "")
+    recs         = ai.get("recommendations", [])
 
-    sim_toggle = pn.widgets.RadioButtonGroup(
-        options=["TCI","SR"], value=state.active_sim,
-        stylesheets=[f"""
-          :host .bk-btn-group button{{background:none;border:1px solid var(--border2);
-            border-radius:999px;color:var(--muted);font-family:'DM Mono',monospace;
-            font-size:10px;padding:4px 12px;margin:2px;transition:all .2s}}
-          :host .bk-btn-group button.bk-active{{background:{bg2};border-color:{acc};color:{acc}}}
-        """])
-    sim_toggle.param.watch(lambda e: setattr(state,"active_sim",e.new), "value")
+    # Comfort status — three states, zero jargon
+    if avg_tci_f < 26:
+        st_icon, st_color, st_bg = "\U0001f7e2", "#2a8a5a", "rgba(42,138,90,0.07)"
+        st_label = "Great conditions to be outside"
+        st_desc  = (f"Most of the area is comfortable right now \u2014 "
+                    f"green zones on the map are the most pleasant spots to walk or sit.")
+    elif avg_tci_f < 32:
+        st_icon, st_color, st_bg = "\U0001f7e1", "#c86a20", "rgba(200,106,32,0.07)"
+        st_label = "Warm \u2014 stick to the green areas"
+        st_desc  = (f"It's warm outside. Look for the green zones on the map \u2014 "
+                    f"those are the shadier, cooler streets. Avoid yellow and red areas "
+                    f"during the hottest part of the day.")
+    else:
+        st_icon, st_color, st_bg = "\U0001f534", "#c0352a", "rgba(192,53,42,0.07)"
+        st_label = "Hot \u2014 limit time outside"
+        st_desc  = (f"It\u2019s quite hot. Red areas on the map are uncomfortable for children "
+                    f"and elderly people. If you go out, keep to shaded streets shown in green "
+                    f"and bring water.")
 
-    sv_panel = pn.Column(
-        pn.pane.HTML(_STREET_VIEW_JS, sizing_mode="stretch_width",
-                     styles={"height":"48vh","min-height":"340px","position":"relative",
-                             "background":"#0c1520","border-bottom":"1px solid var(--border2)"}),
-        pn.Row(
-            _h(f'<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;color:rgba(255,255,255,0.5)">\U0001f4cd {state.address_str}</div>'),
-            _h(f'<div style="display:flex;align-items:center;gap:.4rem;background:rgba(42,110,168,0.5);'
-               f'border:1px solid rgba(42,110,168,0.4);border-radius:999px;padding:3px 10px;'
-               f'font-family:\'DM Mono\',monospace;font-size:9.5px;color:rgba(255,255,255,0.9)">'
-               f'\U0001f321 Thermal comfort analysis</div>'),
-            sizing_mode="stretch_width",
-            styles={"position":"absolute","top":"0","left":"0","right":"0","z-index":"10",
-                    "background":"linear-gradient(to bottom,rgba(12,21,32,0.7),transparent)",
-                    "padding":"10px 14px","align-items":"center","justify-content":"space-between"},
-        ),
-        sizing_mode="stretch_width",
-        styles={"position":"relative"},
-    )
-
-    services_tab = pn.Column(
-        _h('<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;letter-spacing:.14em;'
-           'text-transform:uppercase;color:var(--muted);margin:.6rem 0 .4rem;'
-           'padding-bottom:.35rem;border-bottom:1px solid var(--border)">Nearby \u2014 walking time from your location</div>'),
-        *[_h(f'<div style="display:flex;align-items:center;gap:.7rem;padding:.65rem 0;border-bottom:1px solid var(--border)">'
-             f'<div style="font-size:20px;flex-shrink:0;width:28px;text-align:center">{icon}</div>'
-             f'<div style="flex:1"><div style="font-size:13px;font-weight:500">{name}</div>'
-             f'<div style="font-size:11px;color:var(--muted);margin-top:1px">{detail}</div></div>'
-             f'<div style="text-align:right"><div style="font-family:\'DM Mono\',monospace;font-size:11px;color:var(--muted)">{dist}</div>'
-             f'<div style="font-family:\'Fraunces\',serif;font-size:1rem;font-weight:300;color:var(--score-dg)">{time}</div></div></div>')
-          for icon,name,detail,dist,time in [
-            ("\u2615","The Coffee Collective","Specialty coffee \u00b7 outdoor seating \u00b7 shade","380 m","4 min"),
-            ("\U0001f333","Kongens Have","Public park \u00b7 shaded alleys \u00b7 benches","900 m","11 min"),
-            ("\U0001f689","N\u00f8rreport Station","Metro \u00b7 S-train \u00b7 bus hub","600 m","7 min"),
-            ("\U0001f37d","Torvehallerne Market","Food market \u00b7 semi-covered \u00b7 high footfall","650 m","8 min"),
-        ]],
-        sizing_mode="stretch_width",
-        styles={"overflow-y":"auto","flex":"1","padding":"0 1.2rem"},
-    )
-
-    env_tab = pn.Column(
-        _h(f'<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;letter-spacing:.14em;'
-           f'text-transform:uppercase;color:var(--muted);margin:.6rem 0 .5rem;'
-           f'padding-bottom:.35rem;border-bottom:1px solid var(--border)">How does it feel outside right now?</div>'
-           f'<div style="background:{bg2};border:1px solid rgba(42,110,168,0.2);border-radius:10px;'
-           f'padding:1rem;margin-bottom:.8rem">'
-           f'<div style="font-size:13px;font-weight:500;color:{acc};margin-bottom:.4rem">\U0001f321 Thermal Comfort</div>'
-           f'<div><span style="font-family:\'Fraunces\',serif;font-size:2rem;font-weight:200">{avg_tci_f:.1f}</span>'
-           f'<span style="font-family:\'DM Mono\',monospace;font-size:10px;color:var(--muted);margin-left:4px">\u00b0C UTCI \u00b7 feels like at pedestrian level</span></div>'
-           f'<div style="font-size:11px;color:var(--muted);margin-top:.3rem;line-height:1.5">{utci_msg}</div></div>'
-           f'<div style="font-size:12.5px;color:var(--muted);line-height:1.75;margin-bottom:.8rem">{summary}</div>'
-           f'<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;letter-spacing:.14em;'
-           f'text-transform:uppercase;color:var(--muted);margin-bottom:.4rem;'
-           f'padding-bottom:.35rem;border-bottom:1px solid var(--border)">UTCI comfort guide</div>'),
-        *[_h(f'<div style="display:flex;align-items:center;gap:.7rem;padding:.6rem 0;border-bottom:1px solid var(--border)">'
-             f'<div style="font-size:18px;width:26px;text-align:center">{icon}</div>'
-             f'<div style="flex:1;font-size:12px;color:var(--ink2)">{label}</div>'
-             f'<div style="font-family:\'DM Mono\',monospace;font-size:12px;font-weight:500;color:{col}">{lbl}</div></div>')
-          for icon,label,lbl,col in [
-            ("\U0001f9ca","Below 9\u00b0C \u2014 Very cold conditions","Cold","#2a7a9a"),
-            ("\U0001f60a","9\u201326\u00b0C \u2014 Comfortable outdoor conditions","Comfortable","#2a7a4a"),
-            ("\u2600\ufe0f","26\u201332\u00b0C \u2014 Warm, some heat stress possible","Moderate","#9a7010"),
-            ("\U0001f975","32\u201338\u00b0C \u2014 Hot, limit time in direct sun","Heat stress","#c03030"),
-            ("\U0001f6a8","Above 38\u00b0C \u2014 Dangerous heat, seek shade","Extreme","#c03030"),
-        ]],
-        pn.Column(_new_analysis_btn(acc), styles={"padding":".5rem 0 .5rem"}),
-        sizing_mode="stretch_width",
-        styles={"overflow-y":"auto","flex":"1","padding":"0 1.2rem"},
-    )
-
-    route_tab = pn.Column(
-        _h('<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;letter-spacing:.14em;'
-           'text-transform:uppercase;color:var(--muted);margin:.6rem 0 .4rem;'
-           'padding-bottom:.35rem;border-bottom:1px solid var(--border)">Your comfort along the recommended route</div>'),
-        *[_h(f'<div style="display:flex;align-items:center;gap:.7rem;padding:.6rem 0;border-bottom:1px solid var(--border)">'
-             f'<div style="font-size:18px;width:26px;text-align:center">{icon}</div>'
-             f'<div style="flex:1;font-size:12px;color:var(--ink2)">{label}</div>'
-             f'<div style="font-family:\'DM Mono\',monospace;font-size:12px;font-weight:500;color:{col}">{val}</div></div>')
-          for icon,label,val,col in [
-            ("\U0001f311","Shadow coverage along route",f"{max(30,100-int(avg_tci_f*2))}%","#2a7a4a"),
-            ("\U0001f321","Mean thermal comfort along route",f"{avg_tci_f:.0f}\u00b0C UTCI",
-             "#2a7a4a" if avg_tci_f<26 else "#9a7010" if avg_tci_f<32 else "#c03030"),
-            ("\u2600\ufe0f","Direct sun exposure sections",f"{min(70,int(avg_sr_f*8))}% of route",
-             "#9a7010" if avg_sr_f>5 else "#2a7a4a"),
-        ]],
-        *[_h(f'<div style="background:var(--card);border:1px solid var(--border);'
-             f'border-left:3px solid {acc};border-radius:10px;padding:.8rem 1rem;margin:.5rem 0">'
-             f'<div style="font-size:12px;color:var(--muted);line-height:1.6">{r}</div></div>')
-          for r in recs[:2]],
-        sizing_mode="stretch_width",
-        styles={"overflow-y":"auto","flex":"1","padding":"0 1.2rem"},
-    )
-
-    tabs = pn.Tabs(
-        ("Nearby Services",        services_tab),
-        ("Environmental Analysis", env_tab),
-        ("Route Quality",          route_tab),
-        stylesheets=[f"""
-          :host .bk-tab{{padding:9px 14px;font-size:12px;color:var(--muted);
-            border-bottom:2px solid transparent;transition:all .2s}}
-          :host .bk-tab.bk-active{{color:{acc};border-bottom-color:{acc};font-weight:500}}
-          :host .bk-tabs-header{{border-bottom:1px solid var(--border)}}
-        """],
+    recs_html = "".join(
+        f'<div style="display:flex;gap:.8rem;padding:.75rem 0;border-bottom:1px solid var(--border)">'
+        f'<div style="font-family:\'DM Mono\',monospace;font-size:11px;font-weight:500;'
+        f'color:{acc};flex-shrink:0;margin-top:2px">{i+1}</div>'
+        f'<div style="font-size:13px;color:var(--ink2);line-height:1.65">{r}</div></div>'
+        for i, r in enumerate(recs[:3])
     )
 
     right = pn.Column(
-        sv_panel,
-        pn.Row(
-            *[_h(f'<div style="padding:.65rem .7rem;border-right:1px solid var(--border)">'
-                 f'<div style="font-family:\'DM Mono\',monospace;font-size:8.5px;letter-spacing:.08em;'
-                 f'text-transform:uppercase;color:var(--muted);margin-bottom:2px">{mode}</div>'
-                 f'<div style="font-family:\'Fraunces\',serif;font-size:1.6rem;font-weight:200;'
-                 f'letter-spacing:-.02em;line-height:1.1;color:{col}">{num}</div>'
-                 f'<div style="font-size:9px;color:var(--muted);line-height:1.3">{lbl}</div></div>')
-              for mode,num,col,lbl in [
-                ("\U0001f6b6 Walk","87","#2a8a5a","Walker's Paradise"),
-                ("\U0001f6b4 Bike","74","#2a6ea8","Very Bikeable"),
-                ("\U0001f68c Transit","91","#2a8a5a","Excellent transit"),
-            ]],
-            pn.Row(sim_toggle, styles={"padding":".5rem","align-self":"center"}),
+        # Status block — big, clear, no numbers
+        _h(f'<div style="padding:1.4rem 1.4rem 1.1rem;background:{st_bg};'
+           f'border-bottom:1px solid var(--border)">'
+           f'<div style="display:flex;align-items:flex-start;gap:.9rem;margin-bottom:.65rem">'
+           f'<span style="font-size:2.2rem;line-height:1">{st_icon}</span>'
+           f'<div><div style="font-size:17px;font-weight:600;color:{st_color};line-height:1.2">'
+           f'{st_label}</div>'
+           f'<div style="font-family:\'DM Mono\',monospace;font-size:9px;color:var(--muted);'
+           f'letter-spacing:.08em;text-transform:uppercase;margin-top:4px">'
+           f'\U0001f4cd {state.address_str}</div></div></div>'
+           f'<div style="font-size:13px;color:var(--ink2);line-height:1.65">{st_desc}</div>'
+           f'</div>'),
+        # AI summary + recommendations
+        pn.Column(
+            _h(f'<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;letter-spacing:.14em;'
+               f'text-transform:uppercase;color:var(--muted);margin-bottom:.5rem;'
+               f'padding-bottom:.35rem;border-bottom:1px solid var(--border)">About this area</div>'
+               f'<div style="font-size:13px;color:var(--muted);line-height:1.75;margin-bottom:1.1rem">'
+               f'{summary}</div>'
+               f'<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;letter-spacing:.14em;'
+               f'text-transform:uppercase;color:var(--muted);margin-bottom:.3rem;'
+               f'padding-bottom:.35rem;border-bottom:1px solid var(--border)">Tips for your visit</div>'
+               f'{recs_html}'),
+            pn.Column(_new_analysis_btn(acc), styles={"padding":"1rem 0 1.5rem"}),
             sizing_mode="stretch_width",
-            styles={"border-bottom":"1px solid var(--border)","display":"flex","flex-wrap":"nowrap"},
+            styles={"overflow-y":"auto","flex":"1","padding":"1rem 1.4rem"},
         ),
-        tabs,
         sizing_mode="stretch_width",
-        styles={**_PANEL_STYLES,"flex":"0 0 520px","width":"520px"},
+        styles={**_PANEL_STYLES,"flex":"0 0 380px","width":"380px"},
+    )
+
+    # Map + comfort zone legend below it
+    map_col = pn.Column(
+        pn.panel(_map_pane, sizing_mode="stretch_both"),
+        _h('<div style="background:var(--surface);border-top:1px solid var(--border);'
+           'padding:.45rem 1rem;display:flex;gap:1.4rem;align-items:center;flex-shrink:0">'
+           '<span style="font-family:\'DM Mono\',monospace;font-size:9px;color:var(--muted);'
+           'text-transform:uppercase;letter-spacing:.1em;white-space:nowrap">Comfort zones</span>'
+           '<span style="display:flex;align-items:center;gap:.35rem;font-size:11.5px;color:var(--ink2)">'
+           '<span style="width:11px;height:11px;background:#4a9050;border-radius:3px;'
+           'display:inline-block;flex-shrink:0"></span>Comfortable</span>'
+           '<span style="display:flex;align-items:center;gap:.35rem;font-size:11.5px;color:var(--ink2)">'
+           '<span style="width:11px;height:11px;background:#e8a020;border-radius:3px;'
+           'display:inline-block;flex-shrink:0"></span>Warm \u2014 seek shade</span>'
+           '<span style="display:flex;align-items:center;gap:.35rem;font-size:11.5px;color:var(--ink2)">'
+           '<span style="width:11px;height:11px;background:#c0352a;border-radius:3px;'
+           'display:inline-block;flex-shrink:0"></span>Hot \u2014 avoid if possible</span>'
+           '</div>'),
+        sizing_mode="stretch_both",
+        styles={"flex":"1","min-width":"0"},
     )
 
     return pn.Column(
         _topbar(),
         pn.Row(
-            pn.panel(_map_pane, sizing_mode="stretch_both", styles={"flex":"1","min-width":"0"}),
+            map_col,
             right,
             sizing_mode="stretch_both",
             styles={"display":"flex","flex-wrap":"nowrap","overflow":"hidden"},
@@ -1132,6 +1038,43 @@ def _build_aec():
         for i, r in enumerate(ai_recs[:5])
     )
 
+    # Technical distribution stats for AEC header
+    tci_p50 = float(np.percentile(tv, 50)) if tv.size else 0
+    tci_p75 = float(np.percentile(tv, 75)) if tv.size else 0
+    tci_p98 = float(np.percentile(tv, 98)) if tv.size else 0
+    pct_extreme = float(100*(tv>38).sum()/tv.size) if tv.size else 0
+    sr_p98  = float(np.percentile(sv, 98)) if sv.size else 0
+    pz_pct  = 0.0
+    if tv.size and sv.size:
+        tf = tci.flatten(); sf = sr.flatten()
+        m  = ~(np.isnan(tf) | np.isnan(sf))
+        if m.sum() > 0:
+            tt = float(np.percentile(tf[m], 70)); st2 = float(np.percentile(sf[m], 70))
+            pz_pct = round(100*((tf[m]>=tt)&(sf[m]>=st2)).sum()/m.sum(), 1)
+
+    stat_pill = (
+        lambda lbl, val: f'<span style="display:inline-flex;flex-direction:column;'
+        f'padding:5px 10px;border-right:1px solid var(--border)">'
+        f'<span style="font-family:\'DM Mono\',monospace;font-size:8.5px;color:var(--muted);'
+        f'text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px">{lbl}</span>'
+        f'<span style="font-family:\'DM Mono\',monospace;font-size:12px;color:var(--ink);'
+        f'font-weight:500">{val}</span></span>'
+    )
+    stats_row_html = (
+        f'<div style="display:flex;flex-wrap:wrap;gap:0;border:1px solid var(--border);'
+        f'border-radius:8px;overflow:hidden;margin-bottom:.6rem;background:var(--card)">'
+        + stat_pill("UTCI mean",   f"{avg_tci:.1f}\u00b0C")
+        + stat_pill("P50",         f"{tci_p50:.1f}\u00b0C")
+        + stat_pill("P75",         f"{tci_p75:.1f}\u00b0C")
+        + stat_pill("P98",         f"{tci_p98:.1f}\u00b0C")
+        + stat_pill(">32\u00b0C",  f"{pct_hot:.0f}%")
+        + stat_pill(">38\u00b0C",  f"{pct_extreme:.0f}%")
+        + stat_pill("SR mean",     f"{avg_sr:.1f} kWh/m\u00b2")
+        + stat_pill("SR P98",      f"{sr_p98:.1f} kWh/m\u00b2")
+        + stat_pill("Priority\nzone", f"{pz_pct:.0f}%")
+        + '</div>'
+    )
+
     sim_toggle = pn.widgets.RadioButtonGroup(
         options=["TCI","SR"], value=state.active_sim,
         stylesheets=[f"""
@@ -1214,11 +1157,20 @@ def _build_aec():
     )
 
     right = pn.Column(
+        # Stats header + sim toggle
+        _h(f'<div style="padding:.7rem 1rem .5rem;border-bottom:1px solid var(--border)">'
+           f'<div style="display:flex;align-items:center;justify-content:space-between;'
+           f'margin-bottom:.55rem">'
+           f'<span style="font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:.14em;'
+           f'text-transform:uppercase;color:var(--muted)">Simulation statistics \u2014 512\u00d7512 m tile</span>'
+           f'</div>'
+           f'{stats_row_html}'
+           f'</div>'),
         pn.Row(
             _h('<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;letter-spacing:.14em;'
-               'text-transform:uppercase;color:var(--muted)">Active simulation</div>'),
+               'text-transform:uppercase;color:var(--muted)">Active layer</div>'),
             sim_toggle, sizing_mode="stretch_width",
-            styles={"padding":".5rem 1rem","border-bottom":"1px solid var(--border)",
+            styles={"padding":".45rem 1rem","border-bottom":"1px solid var(--border)",
                     "align-items":"center","justify-content":"space-between"},
         ),
         tabs,

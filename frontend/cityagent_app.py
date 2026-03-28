@@ -164,6 +164,7 @@ class AppState(param.Parameterized):
     active_sim    = param.Selector(default="TCI", objects=["TCI","SR"])
     ai_result     = param.Dict(default={})
     walk_mode     = param.Boolean(default=False)   # True when prompt is about a route/walk
+    poi_list      = param.List(default=[])         # [{name, amenity, lat, lon}] for walk mode
 
 state = AppState()
 
@@ -205,8 +206,9 @@ def call_infrared(analysis_type, lat, lon, geometries, weather):
     for attempt in range(len(_INFRARED_KEYS)):
         key = _INFRARED_KEYS[(_key_idx + attempt) % len(_INFRARED_KEYS)]
         try:
+            print(f"[infrared] {analysis_type} attempt {attempt+1}/{len(_INFRARED_KEYS)} key={'***'+key[-4:] if key else 'EMPTY'}")
             r = requests.post(INFRARED_URL, data=b64,
-                              headers={**hdrs,"x-api-key":key}, timeout=150)
+                              headers={**hdrs,"x-api-key":key}, timeout=45)
             if not r.ok: print(f"[infrared] {analysis_type} {r.status_code}: {r.text[:300]}")
             r.raise_for_status()
             break
@@ -219,6 +221,51 @@ def call_infrared(analysis_type, lat, lon, geometries, weather):
     with zipfile.ZipFile(io.BytesIO(base64.b64decode(outer["result"]))) as zf:
         result = json.loads(zf.read("data.json"))
     return result if "output" in result else {"output": result}
+
+# ── POI fetch (used in walk mode) ─────────────────────────────────────────────
+_POI_EMOJI = {
+    "cafe": "\u2615", "restaurant": "\U0001f37d", "bar": "\U0001f37a",
+    "pub": "\U0001f37a", "fast_food": "\U0001f354", "ice_cream": "\U0001f366",
+    "bakery": "\U0001f950", "biergarten": "\U0001f37a",
+}
+
+def _fetch_pois(lat: float, lon: float) -> list:
+    """Fetch up to 10 food/drink POIs near (lat, lon) via Overpass API."""
+    import urllib.parse, math as _m
+    ld = 256 / 111320
+    lo = 256 / (111320 * _m.cos(_m.radians(lat)))
+    s, w, n, e = lat - ld, lon - lo, lat + ld, lon + lo
+    q = (
+        f'[out:json][timeout:15];'
+        f'(node[amenity~"cafe|restaurant|bar|pub|fast_food|ice_cream|bakery|biergarten"]'
+        f'({s:.6f},{w:.6f},{n:.6f},{e:.6f}););'
+        f'out 20;'
+    )
+    url = "https://overpass-api.de/api/interpreter?data=" + urllib.parse.quote(q)
+    try:
+        import requests as _req
+        r = _req.get(url, timeout=15)
+        r.raise_for_status()
+        pois = []
+        for el in r.json().get("elements", []):
+            if len(pois) >= 10: break
+            if not el.get("lat") or not el.get("lon"): continue
+            tags = el.get("tags", {})
+            amenity = tags.get("amenity", "")
+            name = tags.get("name") or amenity.replace("_", " ").title()
+            pois.append({
+                "name":    name,
+                "amenity": amenity,
+                "emoji":   _POI_EMOJI.get(amenity, "\U0001f4cd"),
+                "lat":     el["lat"],
+                "lon":     el["lon"],
+            })
+        print(f"[pois] fetched {len(pois)} POIs")
+        return pois
+    except Exception as exc:
+        print(f"[pois] fetch failed: {exc}")
+        return []
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PIPELINE
@@ -306,17 +353,22 @@ def run_pipeline():
         tci_cache  = os.path.join(GRID_CACHE, "tci.npy")
         sr_cache   = os.path.join(GRID_CACHE, "sr.npy")
         grid_meta  = os.path.join(GRID_CACHE, "grid_meta.json")
-        use_grid   = False
-        if os.path.exists(tci_cache) and os.path.exists(sr_cache) and os.path.exists(grid_meta):
+        use_grid = os.path.exists(tci_cache) and os.path.exists(sr_cache)
+        print(f"[pipeline] grid cache: tci={os.path.exists(tci_cache)} sr={os.path.exists(sr_cache)} meta={os.path.exists(grid_meta)} use_grid={use_grid}")
+        if use_grid and os.path.exists(grid_meta):
+            # If meta exists, check location distance; skip cache if moved >10 m
             gm = json.load(open(grid_meta))
             gdist = math.hypot((lat - gm["lat"]) * 111320,
                                (lon - gm["lon"]) * 111320 * math.cos(math.radians(lat)))
-            use_grid = gdist < 10   # reuse only if within 10 m of cached center
+            if gdist >= 10:
+                use_grid = False
 
         _s(status_idx=3, status_pct=38)
         if use_grid:
+            print("[pipeline] TCI: loading from cache")
             tci = np.load(tci_cache)
         else:
+            print("[pipeline] TCI: calling Infrared API ...")
             raw = call_infrared("thermal-comfort-index", lat, lon, buildings, weather)
             tci = np.array(raw["output"], dtype=float).reshape((512,512), order="F")
             np.save(tci_cache, tci)
@@ -324,8 +376,10 @@ def run_pipeline():
 
         _s(status_idx=4, status_pct=60)
         if use_grid:
+            print("[pipeline] SR: loading from cache")
             sr = np.load(sr_cache)
         else:
+            print("[pipeline] SR: calling Infrared API ...")
             raw = call_infrared("solar-radiation", lat, lon, buildings, weather)
             sr  = np.array(raw["output"], dtype=float).reshape((512,512), order="F")
             np.save(sr_cache, sr)
@@ -370,7 +424,11 @@ def run_pipeline():
         )
         _s(ai_result=ai)
 
-        # Step 7 — done
+        # Step 7 — POIs (walk mode only)
+        if walk:
+            _s(poi_list=_fetch_pois(lat, lon))
+
+        # Step 8 — done
         _s(status_idx=7, status_pct=100)
         import time; time.sleep(0.4)
         _s(view="results")
@@ -383,8 +441,9 @@ def run_pipeline():
 # MAP — reactive, analysis-aware
 # ══════════════════════════════════════════════════════════════════════════════
 @pn.depends(state.param.active_sim, state.param.tci_grid, state.param.sr_grid,
-            state.param.user_type, state.param.lat, state.param.lon, state.param.walk_mode)
-def _map_pane(active_sim, tci_grid, sr_grid, user_type, lat, lon, walk_mode):
+            state.param.user_type, state.param.lat, state.param.lon,
+            state.param.walk_mode, state.param.poi_list)
+def _map_pane(active_sim, tci_grid, sr_grid, user_type, lat, lon, walk_mode, poi_list):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.cm as mcm
@@ -454,7 +513,7 @@ def _map_pane(active_sim, tci_grid, sr_grid, user_type, lat, lon, walk_mode):
     if tci_grid is None and sr_grid is None:
         return pn.pane.HTML(_base(), sizing_mode="stretch_width")
 
-    # ── Citizen walk mode: real-road route via OSRM ───────────────────────────
+    # ── Citizen walk mode: real-road route via OSRM + pre-fetched POIs ───────
     if user_type == "citizen" and walk_mode and tci_grid is not None:
         # Place start ~160 m north, end ~160 m south of tile centre
         s_lat = round(lat + ld * 0.70, 6)
@@ -464,7 +523,14 @@ def _map_pane(active_sim, tci_grid, sr_grid, user_type, lat, lon, walk_mode):
         osrm  = (f"https://router.project-osrm.org/route/v1/foot/"
                  f"{s_lon},{s_lat};{e_lon},{e_lat}"
                  f"?overview=full&geometries=geojson")
+        # Build POI JS array from server-fetched data (no client-side Overpass call)
+        import json as _json
+        poi_js = _json.dumps([
+            {"n": p["name"], "e": p["emoji"], "lat": p["lat"], "lon": p["lon"]}
+            for p in (poi_list or [])
+        ])
         extra = (
+            # ── Route ──────────────────────────────────────────────────────
             f"fetch('{osrm}')"
             ".then(function(r){return r.json();})"
             ".then(function(d){"
@@ -472,11 +538,21 @@ def _map_pane(active_sim, tci_grid, sr_grid, user_type, lat, lon, walk_mode):
             "var c=d.routes[0].geometry.coordinates.map(function(p){return[p[1],p[0]];});"
             "L.polyline(c,{color:'#2a6ea8',weight:5,opacity:0.92,lineJoin:'round'}).addTo(m);"
             "L.circleMarker(c[0],{radius:9,color:'#fff',weight:2,fillColor:'#1c4a8a',fillOpacity:1})"
-            ".bindTooltip('Start').addTo(m);"
+            ".bindTooltip('Start',{permanent:true,direction:'top',offset:[0,-8]}).addTo(m);"
             "L.circleMarker(c[c.length-1],{radius:9,color:'#fff',weight:2,fillColor:'#2a8a5a',fillOpacity:1})"
-            ".bindTooltip('End').addTo(m);"
+            ".bindTooltip('End',{permanent:true,direction:'top',offset:[0,-8]}).addTo(m);"
             "m.fitBounds(L.latLngBounds(c).pad(0.15));"
             "}).catch(function(){});"
+            # ── POIs injected from server ───────────────────────────────────
+            f"var _pois={poi_js};"
+            "_pois.forEach(function(p){"
+            "var ic=L.divIcon({html:'<div style=\"font-size:20px;line-height:1;"
+            "filter:drop-shadow(0 1px 3px rgba(0,0,0,.45))\">'+(p.e||'\U0001f4cd')+'</div>',"
+            "iconSize:[24,24],iconAnchor:[12,12],className:''});"
+            "L.marker([p.lat,p.lon],{icon:ic})"
+            ".bindTooltip('<b>'+p.n+'</b>',{direction:'top',offset:[0,-10]})"
+            ".addTo(m);"
+            "});"
         )
         return pn.pane.HTML(_base(extra), sizing_mode="stretch_width")
 
@@ -635,6 +711,7 @@ def _on_run(event):
     state.tci_grid     = None
     state.ai_result    = {}
     state.walk_mode    = False
+    state.poi_list     = []
     threading.Thread(target=run_pipeline, daemon=True).start()
 
 run_btn.on_click(_on_run)
@@ -1055,6 +1132,7 @@ def _build_citizen():
     ai        = state.ai_result or {}
     tci       = state.tci_grid
     walk_mode = state.walk_mode
+    pois      = state.poi_list or []
     def _v(a): return a[~np.isnan(a)] if a is not None else np.array([])
     tv  = _v(tci)
     acc, bg2, bg3 = ACCENT["citizen"]
@@ -1119,8 +1197,9 @@ def _build_citizen():
         f'</div>'
     )
 
-    inner = pn.Column(
-        _h(f'<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;letter-spacing:.14em;'
+    analysis_tab = pn.Column(
+        _h(f'<div style="padding:1rem 1.4rem">'
+           f'<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;letter-spacing:.14em;'
            f'text-transform:uppercase;color:var(--muted);margin-bottom:.5rem;'
            f'padding-bottom:.35rem;border-bottom:1px solid var(--border)">About this area</div>'
            f'<div style="font-size:13px;color:var(--muted);line-height:1.75;margin-bottom:1.1rem">'
@@ -1129,13 +1208,57 @@ def _build_citizen():
            f'text-transform:uppercase;color:var(--muted);margin-bottom:.3rem;'
            f'padding-bottom:.35rem;border-bottom:1px solid var(--border)">'
            f'{"Route tips" if walk_mode else "Tips for your visit"}</div>'
-           f'{recs_html}'),
-        pn.Column(_new_analysis_btn(acc), styles={"padding":"1rem 0 1.5rem"}),
+           f'{recs_html}</div>'),
+        pn.Column(_new_analysis_btn(acc), styles={"padding":"1rem 1.4rem 1.5rem"}),
         sizing_mode="stretch_width",
-        styles={"overflow-y":"auto","flex":"1","padding":"1rem 1.4rem"},
+        styles={"overflow-y":"auto","flex":"1"},
     )
 
-    panel_children = ([sv_pane] if sv_pane else []) + [status_block, inner]
+    # ── Nearby Spots tab (walk mode only) ──────────────────────────────────
+    if walk_mode and pois:
+        _AMENITY_LABEL = {
+            "cafe": "Cafe", "restaurant": "Restaurant", "bar": "Bar",
+            "pub": "Pub", "fast_food": "Fast food", "ice_cream": "Ice cream",
+            "bakery": "Bakery", "biergarten": "Beer garden",
+        }
+        poi_rows = "".join(
+            f'<div style="display:flex;align-items:center;gap:.9rem;padding:.7rem 0;'
+            f'border-bottom:1px solid var(--border);cursor:default" '
+            f'title="{p["amenity"]}">'
+            f'<span style="font-size:22px;flex-shrink:0">{p["emoji"]}</span>'
+            f'<div><div style="font-size:13px;font-weight:500;color:var(--ink)">{p["name"]}</div>'
+            f'<div style="font-size:11px;color:var(--muted)">'
+            f'{_AMENITY_LABEL.get(p["amenity"], p["amenity"].replace("_"," ").title())}'
+            f'</div></div></div>'
+            for p in pois
+        )
+        spots_tab = pn.Column(
+            _h(f'<div style="padding:1rem 1.4rem">'
+               f'<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;letter-spacing:.14em;'
+               f'text-transform:uppercase;color:var(--muted);margin-bottom:.5rem;'
+               f'padding-bottom:.35rem;border-bottom:1px solid var(--border)">'
+               f'Spots along the route</div>'
+               f'{poi_rows}</div>'),
+            sizing_mode="stretch_width",
+            styles={"overflow-y":"auto","flex":"1"},
+        )
+        _tab_css = f"""
+          :host .bk-tab{{padding:8px 13px;font-size:12px;color:var(--muted);
+            border-bottom:2px solid transparent;transition:all .2s}}
+          :host .bk-tab.bk-active{{color:{acc};border-bottom-color:{acc};font-weight:500}}
+          :host .bk-tabs-header{{border-bottom:1px solid var(--border)}}
+        """
+        inner_tabs = pn.Tabs(
+            ("Analysis", analysis_tab),
+            (f"\U0001f4cd Nearby ({len(pois)})", spots_tab),
+            stylesheets=[_tab_css],
+            sizing_mode="stretch_width",
+            styles={"flex":"1","overflow":"hidden"},
+        )
+        panel_children = ([sv_pane] if sv_pane else []) + [status_block, inner_tabs]
+    else:
+        panel_children = ([sv_pane] if sv_pane else []) + [status_block, analysis_tab]
+
     right = pn.Column(
         *panel_children,
         sizing_mode="stretch_width",
@@ -1410,31 +1533,9 @@ def _build_aec():
         sizing_mode="stretch_width", styles={"overflow-y":"auto","flex":"1"},
     )
 
-    trees_tab = pn.Column(
-        _h(f'<div style="padding:1rem 1.2rem">'
-           f'<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;letter-spacing:.14em;'
-           f'text-transform:uppercase;color:var(--muted);margin-bottom:.6rem;'
-           f'padding-bottom:.35rem;border-bottom:1px solid var(--border)">Tree placement simulation</div>'
-           f'<div style="border:1.5px dashed var(--border2);border-radius:12px;padding:2rem;text-align:center;margin-bottom:1rem">'
-           f'<div style="font-size:32px;margin-bottom:.5rem">\U0001f333</div>'
-           f'<div style="font-size:14px;font-weight:500;color:var(--ink);margin-bottom:.3rem">Upload tree placement data</div>'
-           f'<div style="font-size:12px;color:var(--muted)">Drop a CSV or GeoJSON with coordinates,<br>'
-           f'species, crown diameter, height, LAI</div></div>'
-           f'<div style="font-family:\'DM Mono\',monospace;font-size:9.5px;letter-spacing:.14em;'
-           f'text-transform:uppercase;color:var(--muted);margin-bottom:.5rem;'
-           f'padding-bottom:.35rem;border-bottom:1px solid var(--border)">get_vegetation.py</div>'
-           f'<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;'
-           f'padding:.9rem 1rem;font-size:12px;color:var(--muted);line-height:1.75">'
-           f'Once you upload tree coordinates, <strong style="color:var(--ink)">get_vegetation.py</strong> '
-           f'will overlay your canopy onto the 512 \u00d7 512 m Infrared tile, re-run the UTCI simulation '
-           f'with canopy shading, and display the thermal comfort delta \u2014 before vs. after planting.</div></div>'),
-        sizing_mode="stretch_width", styles={"overflow-y":"auto","flex":"1"},
-    )
-
     tabs = pn.Tabs(
         ("Ecosystem Services", ecosystem_tab),
         ("Sim Comparison",     comparison_tab),
-        ("Tree Placement",     trees_tab),
         stylesheets=[f"""
           :host .bk-tab{{padding:9px 14px;font-size:12px;color:var(--muted);
             border-bottom:2px solid transparent;transition:all .2s}}

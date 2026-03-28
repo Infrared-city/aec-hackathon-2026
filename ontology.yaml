@@ -1,0 +1,520 @@
+# =============================================================================
+# ontology.yaml
+# simRAG — Simulation Ontology & Workflow Registry
+#
+# This file is the single source of truth for the agentic layer.
+# It defines what simulations exist, what triggers them, what data they need,
+# how they combine into workflows, and how results are interpreted.
+#
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │  SYSTEM LAYERS                                                      │
+# │                                                                     │
+# │  1. INTAKE LAYER        intake/                                     │
+# │     User input → address + workflow type → question routing         │
+# │                                                                     │
+# │  2. DATA LAYER          infrared/data/                              │
+# │     get_location   → lat/lon/bbox                                   │
+# │     get_buildings  → dotBIM geometry (.bim)                         │
+# │     get_weather_file  → nearest EPW download                        │
+# │     get_weather_data  → parsed EPW fields per workflow              │
+# │     get_street_network → streets.geojson  (cycling only)            │
+# │     All outputs assembled into SiteContext (context.py)             │
+# │                                                                     │
+# │  3. AGENTIC LAYER       agents/                                     │
+# │     orchestrator.py  — Planner LLM                                  │
+# │       reads: user question + ontology.yaml                          │
+# │       outputs: ordered list of simulations to run                   │
+# │     interpreter.py   — Synthesiser LLM                              │
+# │       reads: all raster results + benchmarks                        │
+# │       outputs: score (0-10) + plain-language findings + 3 recs      │
+# │                                                                     │
+# │  4. API LAYER           infrared/                                   │
+# │     simulations.py   — 8 Infrared API runners (parallel)            │
+# │     client.py        — gzip/base64 encode, post, decode response    │
+# │                                                                     │
+# │  5. RESULTS LAYER       results/                                    │
+# │     aggregator.py    — combines rasters into composite score        │
+# │     router.py        — formats final JSON for frontend              │
+# │                                                                     │
+# │  6. FRONTEND            frontend/                                   │
+# │     Map view + score card + recommendations dashboard               │
+# └─────────────────────────────────────────────────────────────────────┘
+#
+# Read by: backend/agents/orchestrator.py
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# SIMULATIONS
+# Each entry defines one Infrared API simulation.
+# -----------------------------------------------------------------------------
+
+simulations:
+
+  wind-speed:
+    label: Wind Speed
+    description: >
+      Mean wind speed at pedestrian height (2m) across the tile.
+      Based on CFD-simplified annual wind rose from the EPW file.
+    infrared_key: wind-speed
+    layer: api                        # which layer executes this
+    requires_weather: false
+    requires_streets: false
+    output_unit: m/s
+    output_type: numeric
+    colormap: Blues
+    colormap_label: Wind speed (m/s)
+    triggers:
+      - wind
+      - breezy
+      - windy
+      - sheltered
+      - exposed
+      - wind speed
+      - gusty
+      - air movement
+    benchmarks:
+      calm:        "< 2 m/s — sheltered, comfortable for all activities"
+      comfortable: "2–4 m/s — light breeze, generally pleasant"
+      moderate:    "4–6 m/s — noticeable wind, some discomfort"
+      strong:      "> 6 m/s — uncomfortable for extended outdoor stays"
+      source: Beaufort scale / Lawson criteria
+    interacts_with:
+      - sim: thermal-comfort-index
+        effect: High wind speed reduces thermal comfort in cold months
+      - sim: pedestrian-wind-comfort
+        effect: Wind speed is the primary input for Lawson comfort categories
+
+  pedestrian-wind-comfort:
+    label: Pedestrian Wind Comfort
+    description: >
+      Categorical comfort assessment using Lawson / VDI-3787 criteria.
+      Returns A–E comfort categories per pixel, U (unclassified),
+      and None under buildings.
+    infrared_key: pedestrian-wind-comfort
+    layer: api
+    requires_weather: false
+    requires_streets: false
+    output_unit: "category (A–E)"
+    output_type: categorical
+    colormap: null
+    colormap_label: Lawson category
+    triggers:
+      - pedestrian comfort
+      - walking comfort
+      - outdoor comfort
+      - safe for walking
+      - wind comfort
+      - comfortable outside
+      - elderly
+      - children playing
+      - cafe seating
+      - pavement
+    benchmarks:
+      A: "Sitting long-term — fully comfortable"
+      B: "Sitting short-term / standing — comfortable"
+      C: "Walking — acceptable"
+      D: "Uncomfortable for most activities"
+      E: "Dangerous — unsafe for pedestrians"
+      source: Lawson criteria / VDI-3787
+    interacts_with:
+      - sim: wind-speed
+        effect: Derived directly from wind speed distribution
+      - sim: thermal-comfort-index
+        effect: Wind and thermal comfort together define overall livability
+
+  solar-radiation:
+    label: Solar Radiation
+    description: >
+      Cumulative annual solar radiation on horizontal surfaces.
+      Useful for PV potential, overheating risk, and urban heat assessment.
+    infrared_key: solar-radiation
+    layer: api
+    requires_weather: true
+    weather_fields:
+      - global-horizontal-radiation
+      - diffuse-horizontal-radiation
+      - direct-normal-radiation
+    requires_streets: false
+    output_unit: kWh/m²
+    output_type: numeric
+    colormap: YlOrRd
+    colormap_label: Solar radiation (kWh/m²)
+    triggers:
+      - solar
+      - sun
+      - sunshine
+      - radiation
+      - photovoltaic
+      - PV
+      - overheating
+      - heat island
+      - rooftop energy
+      - solar potential
+    benchmarks:
+      low:       "< 800 kWh/m² — heavily shaded, poor solar potential"
+      moderate:  "800–1200 kWh/m² — partially shaded"
+      good:      "1200–1600 kWh/m² — good solar access"
+      excellent: "> 1600 kWh/m² — excellent solar potential"
+      context:   "Copenhagen annual average ~1000 kWh/m²"
+      source: EU Solar Atlas / Infrared validation
+    interacts_with:
+      - sim: daylight-availability
+        effect: High solar radiation correlates with high daylight
+      - sim: thermal-comfort-index
+        effect: High radiation increases mean radiant temperature (UTCI)
+
+  sky-view-factors:
+    label: Sky View Factor
+    description: >
+      Proportion of sky visible from each point (0–1).
+      Low SVF = deep urban canyon. High SVF = open exposure.
+      Key predictor of urban heat island and daylight penetration.
+    infrared_key: sky-view-factors
+    layer: api
+    requires_weather: false
+    requires_streets: false
+    output_unit: "ratio (0–1)"
+    output_type: numeric
+    colormap: GnBu_r
+    colormap_label: Sky view factor (0–1)
+    triggers:
+      - sky view
+      - urban canyon
+      - street canyon
+      - enclosed
+      - open sky
+      - building density
+      - urban morphology
+      - heat island
+      - ventilation
+    benchmarks:
+      enclosed:  "< 0.3 — deep urban canyon, heat island risk"
+      moderate:  "0.3–0.6 — semi-enclosed urban street"
+      open:      "0.6–0.8 — suburban or low-rise context"
+      very_open: "> 0.8 — open plaza or park"
+      source: Oke (1987) Urban Boundary Layer
+    interacts_with:
+      - sim: solar-radiation
+        effect: Low SVF reduces solar radiation at ground level
+      - sim: thermal-comfort-index
+        effect: Low SVF traps heat, increasing night-time temperatures
+
+  daylight-availability:
+    label: Daylight Availability
+    description: >
+      Spatial Daylight Autonomy (sDA) — percentage of occupied hours
+      where daylight exceeds 300 lux without electric light.
+    infrared_key: daylight-availability
+    layer: api
+    requires_weather: true
+    weather_fields:
+      - global-horizontal-radiation
+      - diffuse-horizontal-radiation
+      - direct-normal-radiation
+    requires_streets: false
+    output_unit: "%"
+    output_type: numeric
+    colormap: YlOrBr
+    colormap_label: Daylight autonomy (%)
+    triggers:
+      - daylight
+      - daylighting
+      - natural light
+      - illuminance
+      - lux
+      - bright
+      - dark
+      - shaded street
+      - facade performance
+    benchmarks:
+      poor:      "< 30% — inadequate daylight"
+      adequate:  "30–55% — LEED minimum threshold"
+      good:      "55–75% — good daylight access"
+      excellent: "> 75% — excellent, glare risk"
+      source: LEED v4 / EN 17037
+    interacts_with:
+      - sim: solar-radiation
+        effect: Highly correlated — good daylight implies good solar access
+      - sim: sky-view-factors
+        effect: Higher SVF improves daylight penetration
+
+  direct-sun-hours:
+    label: Direct Sun Hours
+    description: >
+      Average daily hours of direct sunlight per pixel across the
+      analysis period. Critical for seasonal comfort assessment.
+    infrared_key: direct-sun-hours
+    layer: api
+    requires_weather: true
+    weather_fields:
+      - direct-normal-radiation
+      - global-horizontal-radiation
+    requires_streets: false
+    output_unit: h/day
+    output_type: numeric
+    colormap: viridis
+    colormap_label: Direct sun hours (h/day)
+    triggers:
+      - sun hours
+      - sunlight hours
+      - direct sun
+      - shadow
+      - shading
+      - seasonal sun
+      - winter sun
+      - summer sun
+      - sunny spot
+    benchmarks:
+      shaded:    "< 1 h/day — deep shade"
+      partial:   "1–3 h/day — partially shaded"
+      good:      "3–5 h/day — good solar access"
+      excellent: "> 5 h/day — full sun, overheating risk in summer"
+      source: WHO guidance / EN ISO 52016
+    interacts_with:
+      - sim: thermal-comfort-index
+        effect: More direct sun increases mean radiant temperature
+      - sim: solar-radiation
+        effect: Closely correlated with cumulative solar radiation
+
+  thermal-comfort-index:
+    label: Thermal Comfort Index (UTCI)
+    description: >
+      Universal Thermal Climate Index combining air temperature, wind speed,
+      radiation, and humidity into a single equivalent temperature felt
+      by the human body.
+    infrared_key: thermal-comfort-index
+    layer: api
+    requires_weather: true
+    weather_fields:
+      - dry-bulb-temperature
+      - relative-humidity
+      - wind-speed
+      - horizontal-infrared-radiation-intensity
+      - diffuse-horizontal-radiation
+      - direct-normal-radiation
+      - global-horizontal-radiation
+    requires_streets: false
+    output_unit: "°C (UTCI)"
+    output_type: numeric
+    colormap: magma
+    colormap_label: UTCI (°C)
+    triggers:
+      - thermal comfort
+      - feels like
+      - comfortable temperature
+      - heat stress
+      - cold stress
+      - UTCI
+      - outdoor thermal
+      - livability
+      - summer heat
+      - winter cold
+      - elderly comfort
+      - children
+    benchmarks:
+      strong_cold_stress: "< -13°C"
+      moderate_cold:      "-13 to 0°C"
+      no_stress:          "0–9°C — cool, no stress"
+      comfortable:        "9–26°C — comfortable range"
+      moderate_heat:      "26–32°C — moderate heat stress"
+      strong_heat:        "32–38°C — strong heat stress"
+      very_strong_heat:   "> 38°C — dangerous"
+      source: UTCI scale (Bröde et al. 2012)
+    interacts_with:
+      - sim: wind-speed
+        effect: Higher wind lowers UTCI in summer, worsens it in winter
+      - sim: solar-radiation
+        effect: High radiation raises mean radiant temperature and UTCI
+      - sim: direct-sun-hours
+        effect: Direct sun significantly raises UTCI in warm months
+
+  thermal-comfort-statistics:
+    label: Thermal Comfort Statistics
+    description: >
+      Percentage of hours in the analysis period where UTCI falls within
+      the comfortable range (9–26°C). Spatial summary of comfort frequency.
+    infrared_key: thermal-comfort-statistics
+    layer: api
+    requires_weather: true
+    weather_fields:
+      - dry-bulb-temperature
+      - relative-humidity
+      - wind-speed
+      - horizontal-infrared-radiation-intensity
+      - diffuse-horizontal-radiation
+      - direct-normal-radiation
+      - global-horizontal-radiation
+    requires_streets: false
+    output_unit: "% comfortable hours"
+    output_type: numeric
+    colormap: coolwarm
+    colormap_label: Comfortable hours (%)
+    triggers:
+      - comfort statistics
+      - how often comfortable
+      - percentage comfortable
+      - annual comfort
+      - seasonal comfort
+      - comfort frequency
+    benchmarks:
+      poor:      "< 20% — rarely comfortable"
+      moderate:  "20–40% — seasonally comfortable"
+      good:      "40–60% — frequently comfortable"
+      excellent: "> 60% — highly livable"
+      source: Derived from UTCI scale
+    interacts_with:
+      - sim: thermal-comfort-index
+        effect: Statistical aggregation of UTCI values over time
+
+
+# -----------------------------------------------------------------------------
+# WORKFLOWS
+# Predefined simulation combinations for common use cases.
+# The Planner LLM uses these as starting points.
+# Executed by: infrared/simulations.py (API layer)
+# Scored by:   results/aggregator.py (Results layer)
+# -----------------------------------------------------------------------------
+
+workflows:
+
+  solar-daylight:
+    label: Solar & Daylight Analysis
+    description: >
+      Evaluates solar access and daylight quality of a location.
+      Useful for PV assessments, facade studies, and urban shading analysis.
+    simulations:
+      - solar-radiation
+      - daylight-availability
+      - sky-view-factors
+      - direct-sun-hours
+    triggers:
+      - solar
+      - daylight
+      - sun
+      - PV
+      - rooftop
+      - shading
+      - natural light
+    score_label: Solar Access Score
+    score_fn: >
+      Weighted average: solar-radiation (40%) + daylight-availability (40%)
+      + sky-view-factors (20%), normalised 0–10
+    requires_weather: true
+    requires_streets: false
+    data_layer_calls:
+      - get_location
+      - get_buildings
+      - get_weather_file
+      - get_weather_data
+
+  outdoor-comfort:
+    label: Outdoor Thermal Comfort
+    description: >
+      Holistic assessment of outdoor livability combining wind, thermal,
+      and solar conditions. Ideal for public space design, elderly-friendly
+      environments, and café / seating area siting.
+    simulations:
+      - thermal-comfort-index
+      - wind-speed
+      - pedestrian-wind-comfort
+      - direct-sun-hours
+    triggers:
+      - comfortable
+      - livable
+      - outdoor space
+      - plaza
+      - courtyard
+      - seating
+      - elderly
+      - children
+      - public space
+      - park
+    score_label: Outdoor Comfort Score
+    score_fn: >
+      Weighted average: thermal-comfort-index (50%) + pedestrian-wind-comfort (30%)
+      + direct-sun-hours (20%), normalised 0–10
+    requires_weather: true
+    requires_streets: false
+    data_layer_calls:
+      - get_location
+      - get_buildings
+      - get_weather_file
+      - get_weather_data
+
+  cycling-route:
+    label: Cycling Route Wind Analysis
+    description: >
+      Overlays wind speed data onto the street network to score cycling
+      routes by wind exposure. Identifies sheltered corridors for
+      active mobility planning.
+    simulations:
+      - wind-speed
+      - pedestrian-wind-comfort
+    triggers:
+      - cycling
+      - bike
+      - bicycle
+      - cycling route
+      - wind route
+      - active mobility
+      - least windy
+      - sheltered route
+      - commute
+    score_label: Route Wind Exposure Score
+    score_fn: >
+      Mean wind speed sampled along each street segment from the raster,
+      normalised 0–10 (lower = more sheltered = better)
+    requires_weather: false
+    requires_streets: true
+    data_layer_calls:
+      - get_location
+      - get_buildings
+      - get_street_network
+
+
+# -----------------------------------------------------------------------------
+# AGENT CONFIGURATION
+# Injected into LLM system prompts by orchestrator.py and interpreter.py
+# -----------------------------------------------------------------------------
+
+agent:
+
+  # -- Planner (orchestrator.py) --
+  # Reads the user question and selects simulations
+  planner_context: >
+    You are an environmental analysis orchestrator for urban spaces.
+    Given a location and a plain-language question, select the most
+    relevant workflow and simulations from the ontology.
+
+    Rules:
+    - Match the question against workflow triggers first.
+    - If no workflow matches, select individual simulations by trigger.
+    - Select the minimum simulations needed to answer the question.
+    - If weather data is required, confirm EPW fields are available.
+    - If streets are required, confirm street network is available.
+    - Return a JSON object: { "workflow": str, "simulations": [str] }
+
+  # -- Synthesiser (interpreter.py) --
+  # Reads raster results and writes plain-language output
+  synthesiser_context: >
+    You are an environmental analysis interpreter.
+    Given simulation results and benchmark thresholds, produce:
+    1. A composite score from 0–10
+    2. A 2–3 sentence plain-language summary of conditions
+    3. Exactly 3 actionable recommendations, each starting with a verb
+
+    Rules:
+    - Always reference benchmark thresholds when describing values.
+    - Tailor recommendations to the specific spatial pattern in the raster.
+    - When vulnerable groups are mentioned (elderly, children), reference
+      UTCI comfort range (9–26°C) and Lawson category B or better.
+    - Return a JSON object:
+      { "score": float, "summary": str, "recommendations": [str, str, str] }
+
+  score_scale:
+    "0–3":  "Poor — significant environmental challenges"
+    "4–5":  "Below average — notable issues to address"
+    "6–7":  "Acceptable — some room for improvement"
+    "8–9":  "Good — minor optimisation possible"
+    "10":   "Excellent — optimal environmental conditions"

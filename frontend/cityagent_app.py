@@ -422,9 +422,10 @@ def _map_pane(active_sim, tci_grid, sr_grid, user_type, lat, lon, walk_mode):
         return f'<iframe srcdoc="{srcdoc}" style="width:100%;height:calc(100vh - 54px);min-height:480px;border:none;display:block"></iframe>'
 
     def _grid_png(rgba):
-        """float RGBA (H,W,4) → base64 PNG data-URL"""
+        """float RGBA (H,W,4) → base64 PNG data-URL.
+        flipud: grid row 0 = south; Leaflet imageOverlay top = north."""
         buf = io.BytesIO()
-        _mplt.imsave(buf, np.clip(rgba, 0, 1), format="png")
+        _mplt.imsave(buf, np.clip(np.flipud(rgba), 0, 1), format="png")
         return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
     def _cont_rgba(grid, cmap_name, vmin, vmax, alpha=0.60):
@@ -1002,51 +1003,53 @@ def _build_stakeholder():
 # ══════════════════════════════════════════════════════════════════════════════
 
 # Illustrative street-perspective canvas shown in walk/route mode
-_STREET_VIEW_JS = """
-<style>#sv-cv{width:100%;height:100%;display:block}</style>
-<canvas id="sv-cv"></canvas>
-<script>
-(function(){
-function draw(){
-  var cv=document.getElementById('sv-cv');if(!cv)return;
-  var w=cv.offsetWidth||420,h=cv.offsetHeight||190;cv.width=w;cv.height=h;
-  var c=cv.getContext('2d'),vp=0.46;
-  var sky=c.createLinearGradient(0,0,0,h*vp);
-  sky.addColorStop(0,'#7090c0');sky.addColorStop(1,'#9abcda');
-  c.fillStyle=sky;c.fillRect(0,0,w,h*vp);
-  var gnd=c.createLinearGradient(0,h*vp,0,h);
-  gnd.addColorStop(0,'#c8c0a8');gnd.addColorStop(1,'#b0a890');
-  c.fillStyle=gnd;c.fillRect(0,h*vp,w,h);
-  var cx=w/2,rwf=w*0.10,rwn=w*0.46,far=h*vp,near=h;
-  c.fillStyle='#a09880';c.beginPath();
-  c.moveTo(cx-rwf,far);c.lineTo(cx+rwf,far);
-  c.lineTo(cx+rwn,near);c.lineTo(cx-rwn,near);c.closePath();c.fill();
-  c.strokeStyle='rgba(255,255,255,0.45)';c.lineWidth=1.5;c.setLineDash([14,10]);
-  c.beginPath();c.moveTo(cx,far+2);c.lineTo(cx,near);c.stroke();c.setLineDash([]);
-  [[0,0.04,0.26,vp*1.12],[0.02,0.07,0.20,vp*1.06]].forEach(function(d){
-    var g=c.createLinearGradient(d[0]*w,0,(d[0]+d[2])*w,0);
-    g.addColorStop(0,'#d8d0bc');g.addColorStop(1,'#c8c0aa');
-    c.fillStyle=g;c.fillRect(d[0]*w,d[1]*h,d[2]*w,d[3]*h);});
-  [[0.74,0.05,0.26,vp*1.08]].forEach(function(d){
-    var g=c.createLinearGradient(d[0]*w,0,(d[0]+d[2])*w,0);
-    g.addColorStop(0,'#c8c0aa');g.addColorStop(1,'#d8d0bc');
-    c.fillStyle=g;c.fillRect(d[0]*w,d[1]*h,d[2]*w,d[3]*h);});
-  [0.25,0.19,0.32].forEach(function(tx){
-    var ty=vp+0.035,tr=0.048;
-    var g2=c.createRadialGradient(tx*w,ty*h,0,tx*w,ty*h,tr*w);
-    g2.addColorStop(0,'rgba(55,130,55,0.92)');g2.addColorStop(1,'rgba(55,130,55,0)');
-    c.fillStyle=g2;c.beginPath();c.arc(tx*w,ty*h,tr*w,0,Math.PI*2);c.fill();
-    c.fillStyle='rgba(70,50,30,0.55)';c.fillRect(tx*w-2,ty*h,4,h*(1-vp)*0.18);});
-  c.fillStyle='rgba(10,18,30,0.52)';
-  if(c.roundRect)c.roundRect(w/2-90,h-30,180,20,4);else c.rect(w/2-90,h-30,180,20);
-  c.fill();
-  c.fillStyle='rgba(255,255,255,0.65)';c.font='9px monospace';c.textAlign='center';
-  c.fillText('Suggested comfortable route',w/2,h-17);
-}
-window.addEventListener('resize',draw);setTimeout(draw,120);
-})();
-</script>
-"""
+def _street_view_html():
+    """Return an iframe srcdoc street-view illustration (scripts execute in fresh document)."""
+    inner = (
+        '<!DOCTYPE html><html><head><meta charset="utf-8">'
+        '<style>*{margin:0;padding:0}html,body{width:100%;height:100%;background:#0c1520;overflow:hidden}'
+        'canvas{display:block;width:100%;height:100%}</style>'
+        '</head><body><canvas id="sv"></canvas><script>'
+        'function draw(){'
+        'var cv=document.getElementById("sv");'
+        'var w=cv.offsetWidth||420,h=cv.offsetHeight||190;cv.width=w;cv.height=h;'
+        'var c=cv.getContext("2d"),vp=0.46;'
+        'var sky=c.createLinearGradient(0,0,0,h*vp);'
+        'sky.addColorStop(0,"#7090c0");sky.addColorStop(1,"#9abcda");'
+        'c.fillStyle=sky;c.fillRect(0,0,w,h*vp);'
+        'var gnd=c.createLinearGradient(0,h*vp,0,h);'
+        'gnd.addColorStop(0,"#c8c0a8");gnd.addColorStop(1,"#b0a890");'
+        'c.fillStyle=gnd;c.fillRect(0,h*vp,w,h);'
+        'var cx=w/2,rwf=w*0.10,rwn=w*0.46,far=h*vp,near=h;'
+        'c.fillStyle="#a09880";c.beginPath();'
+        'c.moveTo(cx-rwf,far);c.lineTo(cx+rwf,far);'
+        'c.lineTo(cx+rwn,near);c.lineTo(cx-rwn,near);c.closePath();c.fill();'
+        'c.strokeStyle="rgba(255,255,255,0.45)";c.lineWidth=1.5;c.setLineDash([14,10]);'
+        'c.beginPath();c.moveTo(cx,far+2);c.lineTo(cx,near);c.stroke();c.setLineDash([]);'
+        '[[0,0.04,0.26,vp*1.12],[0.02,0.07,0.20,vp*1.06]].forEach(function(d){'
+        'var g=c.createLinearGradient(d[0]*w,0,(d[0]+d[2])*w,0);'
+        'g.addColorStop(0,"#d8d0bc");g.addColorStop(1,"#c8c0aa");'
+        'c.fillStyle=g;c.fillRect(d[0]*w,d[1]*h,d[2]*w,d[3]*h);});'
+        '[[0.74,0.05,0.26,vp*1.08]].forEach(function(d){'
+        'var g=c.createLinearGradient(d[0]*w,0,(d[0]+d[2])*w,0);'
+        'g.addColorStop(0,"#c8c0aa");g.addColorStop(1,"#d8d0bc");'
+        'c.fillStyle=g;c.fillRect(d[0]*w,d[1]*h,d[2]*w,d[3]*h);});'
+        '[0.25,0.19,0.32].forEach(function(tx){'
+        'var ty=vp+0.035,tr=0.048;'
+        'var g2=c.createRadialGradient(tx*w,ty*h,0,tx*w,ty*h,tr*w);'
+        'g2.addColorStop(0,"rgba(55,130,55,0.92)");g2.addColorStop(1,"rgba(55,130,55,0)");'
+        'c.fillStyle=g2;c.beginPath();c.arc(tx*w,ty*h,tr*w,0,Math.PI*2);c.fill();'
+        'c.fillStyle="rgba(70,50,30,0.55)";c.fillRect(tx*w-2,ty*h,4,h*(1-vp)*0.18);});'
+        'c.fillStyle="rgba(10,18,30,0.52)";'
+        'if(c.roundRect)c.roundRect(w/2-90,h-30,180,20,4);else c.rect(w/2-90,h-30,180,20);'
+        'c.fill();'
+        'c.fillStyle="rgba(255,255,255,0.65)";c.font="9px monospace";c.textAlign="center";'
+        'c.fillText("Suggested comfortable route",w/2,h-17);}'
+        'window.addEventListener("resize",draw);draw();'
+        '</script></body></html>'
+    )
+    srcdoc = inner.replace('&', '&amp;').replace('"', '&quot;')
+    return f'<iframe srcdoc="{srcdoc}" style="width:100%;height:190px;border:none;display:block;background:#0c1520"></iframe>'
 
 def _build_citizen():
     ai        = state.ai_result or {}
@@ -1095,12 +1098,11 @@ def _build_citizen():
         for i, r in enumerate(recs[:3])
     )
 
-    # Street view pane — shown only in walk/route mode
+    # Street view pane — shown only in walk/route mode (iframe so canvas script executes)
     sv_pane = pn.pane.HTML(
-        _STREET_VIEW_JS,
+        _street_view_html(),
         sizing_mode="stretch_width",
-        styles={"height":"190px","background":"#0c1520",
-                "border-bottom":"1px solid var(--border2)"},
+        styles={"height":"190px","border-bottom":"1px solid var(--border2)"},
     ) if walk_mode else None
 
     status_block = _h(

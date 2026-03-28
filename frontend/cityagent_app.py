@@ -244,7 +244,18 @@ def run_pipeline():
             persona_from_plan = plan_data.get("persona","citizen")
             ut = _PERSONA_TO_UT.get(persona_from_plan, state.detected_type)
 
+        # The LLM often escalates casual citizen questions ("where to walk with kids")
+        # to "stakeholder" because they involve spatial analysis phrasing.
+        # Guard: if keyword detection clearly reads as citizen AND the LLM's
+        # expert_score is low (< 4), trust the keyword detection.
+        exp_score = int(plan_data.get("expert_score", 0))
+        if state.detected_type == "citizen" and ut == "stakeholder" and exp_score < 4:
+            ut = "citizen"
+
         persona               = plan_data.get("persona", _PERSONA_TO_UT.get(ut,"citizen"))
+        # Re-align persona with the resolved user_type
+        if ut == "citizen":
+            persona = "citizen"
         synthesis_instruction = plan_data.get("synthesis_instruction", "")
         season_str            = plan_data.get("season", "summer")
         sm, em, sh, eh        = SEASON_MONTHS.get(season_str, SEASON_MONTHS["summer"])

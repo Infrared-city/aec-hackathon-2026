@@ -376,55 +376,62 @@ def _map_pane(active_sim, tci_grid, sr_grid, user_type, lat, lon, walk_mode):
         cat[np.isnan(tci_grid)] = np.nan
 
         if walk_mode:
-            # Compute coolest S→N corridor; burn as category -1 (blue) in the raster.
-            # This avoids gv.Path / gv.Points which break the map projection.
-            n_pts = 50
-            rows_s = np.linspace(0, 511, n_pts, dtype=int)
+            # Compute coolest S→N corridor as a proper vector line in Web Mercator.
+            # Convert lat/lon route coords → EPSG:3857 so gv.Path aligns with
+            # CartoLight tiles (which are also Web Mercator).
+            from scipy.ndimage import gaussian_filter
+            from pyproj import Transformer
+            _to_merc = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+
+            # Fill NaN (buildings) with penalty, smooth to find cool corridors
+            nan_mask = np.isnan(tci_grid)
+            penalty  = float(np.nanpercentile(tci_grid, 90)) if (~nan_mask).any() else 40.0
+            tci_sm   = gaussian_filter(np.where(nan_mask, penalty, tci_grid), sigma=18)
+
+            n_pts      = 40
+            rows_s     = np.linspace(8, 503, n_pts, dtype=int)
             route_cols = []
-            prev_col = 256
+            prev_col   = 256
             for r in rows_s:
-                row_data = tci_grid[r, :]
-                w0, w1 = max(0, prev_col - 90), min(512, prev_col + 90)
-                window = np.full(512, np.nan)
-                window[w0:w1] = row_data[w0:w1]
-                best_col = int(np.nanargmin(window)) if (~np.isnan(window)).any() else prev_col
+                w0, w1   = max(0, prev_col - 80), min(512, prev_col + 80)
+                best_col = w0 + int(np.argmin(tci_sm[r, w0:w1]))
                 prev_col = best_col
                 route_cols.append(best_col)
 
-            # Smooth lateral wander
-            k = np.ones(9) / 9
+            k      = np.ones(13) / 13
             cols_s = np.clip(np.convolve(route_cols, k, mode="same").astype(int), 4, 507)
 
-            # Interpolate between sample rows and draw a 6px-wide line
-            for i in range(len(rows_s) - 1):
-                r0, r1 = int(rows_s[i]), int(rows_s[i + 1])
-                c0, c1 = int(cols_s[i]), int(cols_s[i + 1])
-                for r in range(r0, r1 + 1):
-                    if r >= 512: continue
-                    c = int(round(c0 + (c1 - c0) * (r - r0) / max(r1 - r0, 1)))
-                    c = int(np.clip(c, 4, 507))
-                    cat[r, c - 3: c + 4] = -1.0
+            # Grid → lat/lon
+            # Pre-flipud grid: row 0 = north (lat+ld), row 511 = south (lat-ld)
+            r_lats = [lat + ld - (r / 511) * 2 * ld for r in rows_s]
+            r_lons = [lon - lo + (c / 511) * 2 * lo for c in cols_s]
 
-            # Start / end dots (r=10px)
-            for (dr, dc) in np.argwhere(
-                    (np.arange(-11, 12)[:, None]**2 + np.arange(-11, 12)[None, :]**2) <= 110):
-                for r_dot, c_dot in [(int(rows_s[0]),  int(cols_s[0])),
-                                     (int(rows_s[-1]), int(cols_s[-1]))]:
-                    rr = r_dot + dr - 11
-                    cc = c_dot + dc - 11
-                    if 0 <= rr < 512 and 0 <= cc < 512:
-                        cat[rr, cc] = -1.0
+            # Lat/lon → Web Mercator (EPSG:3857) to match CartoLight CRS
+            rx, ry = _to_merc.transform(r_lons, r_lats)
 
-            cmap, clim = ["#2a6ea8", "#4a9050", "#e8a020", "#c0352a"], (-1, 2)
-        else:
-            cmap, clim = ["#4a9050", "#e8a020", "#c0352a"], (0, 2)
+            route_path = gv.Path(
+                [np.column_stack([rx, ry])],
+                kdims=["x", "y"],
+            ).opts(color="#2a6ea8", line_width=4, alpha=0.88,
+                   xaxis=None, yaxis=None)
+
+            start_dot = gv.Points([(rx[0],  ry[0])],  kdims=["x", "y"]).opts(
+                color="#1c4a8a", size=13, marker="circle", xaxis=None, yaxis=None)
+            end_dot   = gv.Points([(rx[-1], ry[-1])], kdims=["x", "y"]).opts(
+                color="#2a8a5a", size=13, marker="circle", xaxis=None, yaxis=None)
+
+        # 3-zone colormap — same whether walk_mode or not (route is a vector overlay)
+        cmap, clim = ["#4a9050", "#e8a020", "#c0352a"], (0, 2)
 
         img = gv.Image(np.flipud(cat), bounds=bounds,
                        kdims=["Longitude","Latitude"], vdims=["comfort"]).opts(
             cmap=cmap, clim=clim, alpha=0.55, colorbar=False,
             tools=["hover"], **base_opts,
         )
-        return pn.pane.HoloViews(tiles * img, sizing_mode="stretch_both")
+        overlay = tiles * img
+        if walk_mode:
+            overlay = overlay * route_path * start_dot * end_dot
+        return pn.pane.HoloViews(overlay, sizing_mode="stretch_both")
 
     # ── Stakeholder: TCI heatmap + priority zone (orange) ─────────────────────
     if user_type == "stakeholder":

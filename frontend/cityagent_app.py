@@ -369,54 +369,62 @@ def _map_pane(active_sim, tci_grid, sr_grid, user_type, lat, lon, walk_mode):
     if user_type == "citizen":
         if tci_grid is None:
             return pn.pane.HoloViews(tiles, sizing_mode="stretch_both")
-        # Encode comfort zones: 0=comfortable, 1=warm, 2=hot
+
+        # Comfort categories: 0=comfortable, 1=warm, 2=hot
         cat = np.where(tci_grid < 26, 0.0,
-              np.where(tci_grid < 32, 1.0, 2.0))
+              np.where(tci_grid < 32, 1.0, 2.0)).astype(float)
         cat[np.isnan(tci_grid)] = np.nan
+
+        if walk_mode:
+            # Compute coolest S→N corridor; burn as category -1 (blue) in the raster.
+            # This avoids gv.Path / gv.Points which break the map projection.
+            n_pts = 50
+            rows_s = np.linspace(0, 511, n_pts, dtype=int)
+            route_cols = []
+            prev_col = 256
+            for r in rows_s:
+                row_data = tci_grid[r, :]
+                w0, w1 = max(0, prev_col - 90), min(512, prev_col + 90)
+                window = np.full(512, np.nan)
+                window[w0:w1] = row_data[w0:w1]
+                best_col = int(np.nanargmin(window)) if (~np.isnan(window)).any() else prev_col
+                prev_col = best_col
+                route_cols.append(best_col)
+
+            # Smooth lateral wander
+            k = np.ones(9) / 9
+            cols_s = np.clip(np.convolve(route_cols, k, mode="same").astype(int), 4, 507)
+
+            # Interpolate between sample rows and draw a 6px-wide line
+            for i in range(len(rows_s) - 1):
+                r0, r1 = int(rows_s[i]), int(rows_s[i + 1])
+                c0, c1 = int(cols_s[i]), int(cols_s[i + 1])
+                for r in range(r0, r1 + 1):
+                    if r >= 512: continue
+                    c = int(round(c0 + (c1 - c0) * (r - r0) / max(r1 - r0, 1)))
+                    c = int(np.clip(c, 4, 507))
+                    cat[r, c - 3: c + 4] = -1.0
+
+            # Start / end dots (r=10px)
+            for (dr, dc) in np.argwhere(
+                    (np.arange(-11, 12)[:, None]**2 + np.arange(-11, 12)[None, :]**2) <= 110):
+                for r_dot, c_dot in [(int(rows_s[0]),  int(cols_s[0])),
+                                     (int(rows_s[-1]), int(cols_s[-1]))]:
+                    rr = r_dot + dr - 11
+                    cc = c_dot + dc - 11
+                    if 0 <= rr < 512 and 0 <= cc < 512:
+                        cat[rr, cc] = -1.0
+
+            cmap, clim = ["#2a6ea8", "#4a9050", "#e8a020", "#c0352a"], (-1, 2)
+        else:
+            cmap, clim = ["#4a9050", "#e8a020", "#c0352a"], (0, 2)
+
         img = gv.Image(np.flipud(cat), bounds=bounds,
                        kdims=["Longitude","Latitude"], vdims=["comfort"]).opts(
-            cmap=["#4a9050", "#e8a020", "#c0352a"],
-            clim=(0, 2), alpha=0.50, colorbar=False,
+            cmap=cmap, clim=clim, alpha=0.55, colorbar=False,
             tools=["hover"], **base_opts,
         )
-        overlay = tiles * img
-
-        # Walk mode: overlay a "coolest path" route through the tile
-        if walk_mode:
-            n_pts = 28
-            rows  = np.linspace(0, 511, n_pts, dtype=int)
-            path_lons, path_lats = [], []
-            prev_col = 256
-            for r in rows:
-                row_data = tci_grid[r, :]
-                # Search within a ±100 col window around the previous point
-                lo2 = max(0,   prev_col - 100)
-                hi2 = min(512, prev_col + 100)
-                window = np.full(512, np.nan)
-                window[lo2:hi2] = row_data[lo2:hi2]
-                valid = ~np.isnan(window)
-                best_col = int(np.nanargmin(window)) if valid.any() else prev_col
-                prev_col = best_col
-                path_lons.append((lon - lo) + (best_col / 511) * 2 * lo)
-                path_lats.append((lat - ld) + (r     / 511) * 2 * ld)
-            # Smooth the horizontal wander
-            k = np.ones(7) / 7
-            path_lons = np.convolve(path_lons, k, mode="same").tolist()
-            pts = np.column_stack([path_lons, path_lats])
-            route = gv.Path([pts], kdims=["Longitude","Latitude"]).opts(
-                color="#2a6ea8", line_width=4, alpha=0.90, **base_opts,
-            )
-            start = gv.Points([(path_lons[0],  path_lats[0])],
-                              kdims=["Longitude","Latitude"]).opts(
-                color="#1c4a8a", size=12, marker="circle", **base_opts,
-            )
-            end = gv.Points([(path_lons[-1], path_lats[-1])],
-                            kdims=["Longitude","Latitude"]).opts(
-                color="#2a8a5a", size=12, marker="circle", **base_opts,
-            )
-            overlay = overlay * route * start * end
-
-        return pn.pane.HoloViews(overlay, sizing_mode="stretch_both")
+        return pn.pane.HoloViews(tiles * img, sizing_mode="stretch_both")
 
     # ── Stakeholder: TCI heatmap + priority zone (orange) ─────────────────────
     if user_type == "stakeholder":

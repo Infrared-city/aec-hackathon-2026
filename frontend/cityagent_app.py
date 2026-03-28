@@ -982,9 +982,9 @@ def _build_aec():
     ax.set_facecolor("#faf8f4")
     ax.set_ylim(0,1); ax.set_yticks([.25,.5,.75,1.0]); ax.set_yticklabels(["","","",""], fontsize=0)
     ax.set_xticks(angs[:-1])
-    ax.set_xticklabels(axes, fontsize=10, color="rgba(60,55,40,0.65)", fontfamily="monospace")
-    ax.spines['polar'].set_color("rgba(60,55,40,0.15)")
-    ax.grid(color="rgba(60,55,40,0.10)", linewidth=0.7)
+    ax.set_xticklabels(axes, fontsize=10, color=(60/255, 55/255, 40/255, 0.65), fontfamily="monospace")
+    ax.spines['polar'].set_color((60/255, 55/255, 40/255, 0.15))
+    ax.grid(color=(60/255, 55/255, 40/255, 0.10), linewidth=0.7)
     bv = vals + [vals[0]]
     ax.plot(angs, bv, color="#2a8a5a", linewidth=1.8)
     ax.fill(angs, bv, alpha=0.22, color="#2a8a5a")

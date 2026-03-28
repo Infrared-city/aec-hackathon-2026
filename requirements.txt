@@ -5,3 +5,17 @@ requests
 shapely
 osmnx
 python-dotenv
+
+# Copenhagen Urban Heat Dashboard
+# Core HoloViz stack
+panel>=1.3.0
+holoviews>=1.18.0
+geoviews>=1.11.0
+hvplot>=0.9.0
+bokeh>=3.3.0
+
+# Data
+pandas>=2.0.0
+
+# GeoViews coordinate transforms (Web Mercator projection for map tiles)
+pyproj>=3.5.0

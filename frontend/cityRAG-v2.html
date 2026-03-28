@@ -1,0 +1,1699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>cityRAG — Urban Intelligence Platform</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Fraunces:ital,opsz,wght@0,9..144,200;0,9..144,300;0,9..144,400;0,9..144,500;1,9..144,200;1,9..144,300&family=Instrument+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ══════════════════════════════════════════════════════
+   TOKENS
+══════════════════════════════════════════════════════ */
+:root {
+  --bg:        #f5f2ec;
+  --bg2:       #ede9e1;
+  --surface:   #faf8f4;
+  --card:      #f0ece4;
+  --card2:     #e8e3d8;
+  --border:    rgba(60,55,40,0.10);
+  --border2:   rgba(60,55,40,0.18);
+  --ink:       #1c1a14;
+  --ink2:      #3a3628;
+  --muted:     rgba(28,26,20,0.45);
+  --dim:       rgba(28,26,20,0.25);
+
+  /* category accents */
+  --sh:        #c8601a;   /* stakeholder — warm amber-orange */
+  --sh2:       rgba(200,96,26,0.10);
+  --sh3:       rgba(200,96,26,0.06);
+  --ct:        #2a6ea8;   /* citizen — clear blue */
+  --ct2:       rgba(42,110,168,0.10);
+  --ct3:       rgba(42,110,168,0.05);
+  --aec:       #2a8a5a;   /* aec — forest green */
+  --aec2:      rgba(42,138,90,0.10);
+  --aec3:      rgba(42,138,90,0.05);
+
+  --green:     #2a8a5a;
+  --score-red: #c0352a;
+  --score-ora: #c86a20;
+  --score-yel: #b89010;
+  --score-lg:  #4a9050;
+  --score-dg:  #2a8a5a;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: var(--bg); color: var(--ink); font-family: 'Instrument Sans', sans-serif; font-size: 14px; overflow: hidden; }
+
+/* ══════════════════════════════════════════════════════
+   SCREENS & DASHBOARDS
+══════════════════════════════════════════════════════ */
+.screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.45s ease, transform 0.45s ease; }
+.screen.hidden { opacity: 0; pointer-events: none; transform: translateY(12px); }
+.dashboard { position: fixed; inset: 0; display: flex; flex-direction: column; transition: opacity 0.45s ease; }
+.dashboard.hidden { opacity: 0; pointer-events: none; }
+
+/* ══════════════════════════════════════════════════════
+   LANDING
+══════════════════════════════════════════════════════ */
+#screen-landing { background: var(--bg); }
+
+.land-grid {
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(60,55,40,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(60,55,40,0.04) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+.land-glow {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 70% 50% at 50% 100%, rgba(200,96,26,0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 30% at 15% 25%, rgba(42,110,168,0.05) 0%, transparent 55%),
+    radial-gradient(ellipse 35% 30% at 85% 20%, rgba(42,138,90,0.05) 0%, transparent 55%);
+}
+
+.land-inner { position: relative; z-index: 1; width: 640px; max-width: 96vw; }
+
+.wordmark {
+  font-family: 'Fraunces', serif;
+  font-size: clamp(2.8rem, 6vw, 4.4rem);
+  font-weight: 200; letter-spacing: -0.03em;
+  color: var(--ink); margin-bottom: 0.2rem; line-height: 1;
+}
+.wordmark em { font-style: italic; color: var(--sh); }
+.tagline {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 3rem;
+}
+
+/* Prompt shell */
+.prompt-shell {
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 14px; padding: 1.6rem;
+  margin-bottom: 1.4rem;
+  box-shadow: 0 2px 24px rgba(60,55,40,0.06), 0 0 0 1px rgba(255,255,255,0.8) inset;
+  transition: border-color 0.3s;
+}
+.prompt-shell.detecting-sh { border-color: var(--sh); box-shadow: 0 2px 24px rgba(200,96,26,0.12), 0 0 0 1px rgba(255,255,255,0.8) inset; }
+.prompt-shell.detecting-ct { border-color: var(--ct); box-shadow: 0 2px 24px rgba(42,110,168,0.12), 0 0 0 1px rgba(255,255,255,0.8) inset; }
+.prompt-shell.detecting-aec { border-color: var(--aec); box-shadow: 0 2px 24px rgba(42,138,90,0.12), 0 0 0 1px rgba(255,255,255,0.8) inset; }
+
+.prompt-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.9rem; }
+.prompt-label { font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+
+/* Live detection indicator */
+.detect-indicator {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-family: 'DM Mono', monospace; font-size: 10px;
+  padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--border2);
+  color: var(--dim); transition: all 0.35s; background: var(--card);
+}
+.detect-indicator.sh { color: var(--sh); border-color: rgba(200,96,26,0.3); background: var(--sh2); }
+.detect-indicator.ct { color: var(--ct); border-color: rgba(42,110,168,0.3); background: var(--ct2); }
+.detect-indicator.aec { color: var(--aec); border-color: rgba(42,138,90,0.3); background: var(--aec2); }
+.detect-indicator.ask { color: #9a6a20; border-color: rgba(154,106,32,0.3); background: rgba(154,106,32,0.08); }
+.detect-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+
+.prompt-row { display: flex; gap: 0.7rem; }
+.main-input {
+  flex: 1; background: var(--card); border: 1px solid var(--border2);
+  border-radius: 9px; color: var(--ink);
+  font-family: 'Instrument Sans', sans-serif; font-size: 15px;
+  padding: 13px 16px; outline: none; transition: border-color 0.2s;
+}
+.main-input:focus { border-color: var(--ink2); }
+.main-input::placeholder { color: var(--dim); }
+.run-btn {
+  background: var(--ink); color: var(--bg);
+  border: none; border-radius: 9px;
+  font-family: 'Instrument Sans', sans-serif; font-size: 14px; font-weight: 500;
+  padding: 13px 26px; cursor: pointer; white-space: nowrap;
+  transition: background 0.2s, transform 0.15s;
+}
+.run-btn:hover { background: var(--ink2); transform: translateY(-1px); }
+
+/* Clarify mode */
+.clarify-box {
+  display: none; margin-top: 0.8rem;
+  background: rgba(154,106,32,0.07); border: 1px solid rgba(154,106,32,0.2);
+  border-radius: 8px; padding: 0.8rem 1rem;
+  font-size: 13px; color: var(--ink2); line-height: 1.6;
+}
+.clarify-box.show { display: block; }
+.clarify-pills { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.6rem; }
+.clarify-pill {
+  padding: 5px 14px; border-radius: 999px; font-size: 12px;
+  border: 1px solid var(--border2); background: var(--surface);
+  cursor: pointer; transition: all 0.2s; font-family: 'DM Mono', monospace;
+  color: var(--ink2);
+}
+.clarify-pill:hover { background: var(--card2); border-color: var(--ink); }
+
+/* Example prompts */
+.example-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.ep-card {
+  flex: 1; min-width: 180px;
+  background: var(--surface); border: 1px solid var(--border2);
+  border-radius: 10px; padding: 0.9rem 1rem; cursor: pointer;
+  transition: all 0.2s; display: flex; flex-direction: column; gap: 0.4rem;
+  box-shadow: 0 1px 8px rgba(60,55,40,0.05);
+}
+.ep-card:hover { border-color: var(--border2); transform: translateY(-2px); box-shadow: 0 4px 16px rgba(60,55,40,0.10); }
+.ep-card.sh:hover { border-color: var(--sh); }
+.ep-card.ct:hover { border-color: var(--ct); }
+.ep-card.aec:hover { border-color: var(--aec); }
+.ep-type { font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; }
+.ep-type.sh { color: var(--sh); }
+.ep-type.ct { color: var(--ct); }
+.ep-type.aec { color: var(--aec); }
+.ep-text { font-size: 12px; color: var(--ink2); line-height: 1.5; }
+
+/* ══════════════════════════════════════════════════════
+   STATUS
+══════════════════════════════════════════════════════ */
+#screen-status { background: var(--bg); }
+
+.status-wordmark { font-family: 'Fraunces', serif; font-size: 1.6rem; font-weight: 200; letter-spacing: -0.02em; color: var(--ink); margin-bottom: 0.3rem; }
+.status-wordmark em { font-style: italic; color: var(--sh); }
+.status-sub { font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-bottom: 2rem; }
+
+.detect-badge {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  border-radius: 999px; padding: 5px 16px; margin-bottom: 1.8rem;
+  font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 500;
+}
+
+.agent-steps { width: 520px; max-width: 94vw; display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 1.6rem; }
+.astep {
+  display: flex; align-items: center; gap: 0.8rem;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 14px;
+  opacity: 0.25; transition: opacity 0.35s, border-color 0.35s, background 0.35s;
+  font-family: 'DM Mono', monospace; font-size: 11.5px; color: var(--muted);
+}
+.astep.active { opacity: 1; color: var(--ink); }
+.astep.done   { opacity: 0.5; }
+.astep-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border2); flex-shrink: 0; transition: background 0.3s; }
+.astep.done .astep-dot { background: var(--aec); }
+@keyframes dotPulse { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+.progress-track { width: 520px; max-width: 94vw; height: 2px; background: var(--border2); border-radius: 99px; overflow: hidden; }
+.progress-fill { height: 100%; border-radius: 99px; width: 0%; transition: width 0.5s ease; background: var(--ink); }
+
+/* ══════════════════════════════════════════════════════
+   DASHBOARD TOP BAR
+══════════════════════════════════════════════════════ */
+.dash-top {
+  height: 52px; background: var(--surface); border-bottom: 1px solid var(--border2);
+  display: flex; align-items: center; padding: 0 1.4rem; gap: 1.2rem; flex-shrink: 0;
+  box-shadow: 0 1px 8px rgba(60,55,40,0.06);
+}
+.dash-logo { font-family: 'Fraunces', serif; font-size: 1.1rem; font-weight: 200; letter-spacing: -0.02em; color: var(--ink); }
+.dash-logo em { font-style: italic; }
+.dash-sep { width: 1px; height: 18px; background: var(--border2); }
+.dash-title { font-size: 12px; color: var(--muted); flex: 1; }
+.dash-cat-pill {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 4px 12px; border-radius: 999px; border: 1px solid;
+  font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 500;
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.new-q-btn {
+  display: flex; align-items: center; gap: 0.4rem;
+  background: var(--ink); color: var(--bg);
+  border: none; border-radius: 7px; padding: 6px 14px;
+  font-family: 'Instrument Sans', sans-serif; font-size: 12px; font-weight: 500;
+  cursor: pointer; transition: background 0.2s, transform 0.15s; white-space: nowrap;
+}
+.new-q-btn:hover { background: var(--ink2); transform: translateY(-1px); }
+
+.dash-body { flex: 1; display: flex; overflow: hidden; position: relative; }
+
+/* Welcome banner */
+.welcome-banner {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+  z-index: 20; pointer-events: none;
+  text-align: center; animation: bannerIn 0.6s ease both;
+}
+@keyframes bannerIn { from{opacity:0;transform:translateX(-50%) translateY(-8px)} to{opacity:1;transform:translateX(-50%) translateY(0)} }
+.wb-greeting { font-family: 'Fraunces', serif; font-size: 1.05rem; font-weight: 300; font-style: italic; color: var(--surface); text-shadow: 0 1px 8px rgba(0,0,0,0.3); }
+.wb-sub { font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255,255,255,0.6); margin-top: 2px; }
+
+/* Split gradient divider */
+.split-div { width: 1px; background: linear-gradient(to bottom, transparent 0%, var(--border2) 15%, var(--border2) 85%, transparent 100%); flex-shrink: 0; }
+
+/* Map area */
+.map-area { flex: 1; position: relative; overflow: hidden; }
+.map-area canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.map-fade-right { position: absolute; top: 0; right: 0; width: 80px; bottom: 0; background: linear-gradient(to left, var(--surface), transparent); pointer-events: none; z-index: 3; }
+
+/* Right panel */
+.right-panel { width: 420px; flex-shrink: 0; background: var(--surface); display: flex; flex-direction: column; overflow: hidden; }
+.rp-scroll { flex: 1; overflow-y: auto; padding: 1rem 1.3rem; }
+.rp-scroll::-webkit-scrollbar { width: 3px; }
+.rp-scroll::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
+
+/* Section label */
+.sec-label { font-family: 'DM Mono', monospace; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.6rem; margin-top: 1.2rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+.sec-label:first-child { margin-top: 0; }
+
+/* ══════════════════════════════════════════════════════
+   STAKEHOLDER DASHBOARD
+══════════════════════════════════════════════════════ */
+
+/* Score block */
+.sh-score-block {
+  padding: 1.3rem 1.4rem; border-bottom: 1px solid var(--border);
+  background: var(--sh3); flex-shrink: 0;
+}
+.sh-score-main { display: flex; align-items: baseline; gap: 0.7rem; margin-bottom: 0.9rem; }
+.sh-score-num {
+  font-family: 'Fraunces', serif; font-size: 5rem;
+  font-weight: 200; line-height: 1; letter-spacing: -0.04em;
+}
+.sh-score-right {}
+.sh-score-label { font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+.sh-score-verdict { font-size: 15px; font-weight: 500; color: var(--ink); margin-top: 4px; }
+.sh-score-desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+.score-bar-stack { margin-bottom: 0.5rem; }
+.score-bar-track { height: 8px; background: var(--border2); border-radius: 99px; overflow: hidden; margin-bottom: 0.3rem; }
+.score-bar-fill { height: 100%; border-radius: 99px; width: 0%; transition: width 1.6s cubic-bezier(.4,0,.2,1); }
+.score-legend { display: grid; grid-template-columns: repeat(5,1fr); gap: 0; height: 4px; border-radius: 99px; overflow: hidden; margin-bottom: 0.3rem; }
+.score-legend div { }
+.score-ranges { display: flex; justify-content: space-between; font-family: 'DM Mono', monospace; font-size: 8.5px; color: var(--dim); }
+
+/* Sim selector strip */
+.sim-strip { display: flex; gap: 0.3rem; padding: 0.7rem 1.4rem; border-bottom: 1px solid var(--border); flex-wrap: wrap; flex-shrink: 0; background: var(--surface); }
+.sim-chip {
+  padding: 4px 11px; border-radius: 999px;
+  font-family: 'DM Mono', monospace; font-size: 10px;
+  border: 1px solid var(--border2); color: var(--muted);
+  cursor: pointer; transition: all 0.2s; background: none;
+}
+.sim-chip:hover { border-color: var(--sh); color: var(--sh); }
+.sim-chip.active { background: var(--sh2); border-color: rgba(200,96,26,0.4); color: var(--sh); font-weight: 500; }
+
+/* KPI grid */
+.kpi-header {
+  font-family: 'Fraunces', serif; font-size: 1.5rem; font-weight: 300;
+  letter-spacing: -0.01em; color: var(--ink); margin-bottom: 0.7rem;
+  line-height: 1.1;
+}
+.kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 1rem; }
+.kpi-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 0.9rem;
+  opacity: 0; transform: translateY(6px);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+.kpi-card.vis { opacity: 1; transform: translateY(0); }
+.kpi-icon { font-size: 22px; margin-bottom: 0.4rem; display: block; }
+.kpi-name { font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.kpi-val { font-family: 'Fraunces', serif; font-size: 1.5rem; font-weight: 300; letter-spacing: -0.02em; color: var(--ink); line-height: 1.1; }
+.kpi-unit { font-size: 10px; color: var(--muted); font-family: 'DM Mono', monospace; }
+.kpi-bar { height: 3px; background: var(--border2); border-radius: 99px; margin-top: 6px; }
+.kpi-bar-fill { height: 100%; border-radius: 99px; transition: width 1.4s ease 0.4s; }
+.kpi-note { font-size: 10px; color: var(--muted); margin-top: 3px; }
+
+/* Recommendations */
+.rec-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-left: 3px solid var(--sh);
+  border-radius: 10px; padding: 0.9rem 1rem; margin-bottom: 0.5rem;
+  opacity: 0; transform: translateX(-6px);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+.rec-card.vis { opacity: 1; transform: translateX(0); }
+.rec-card-top { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.35rem; }
+.rec-n { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--sh); }
+.rec-title { font-size: 13px; font-weight: 500; color: var(--ink); }
+.rec-body { font-size: 12px; color: var(--muted); line-height: 1.65; }
+.rec-delta { display: inline-flex; align-items: center; gap: 0.3rem; background: var(--sh2); color: var(--sh); font-family: 'DM Mono', monospace; font-size: 10px; padding: 2px 8px; border-radius: 999px; margin-top: 0.4rem; }
+
+/* Benchmarks */
+.bm-row {
+  display: flex; align-items: center; gap: 0.7rem;
+  padding: 0.6rem 0; border-bottom: 1px solid var(--border);
+  opacity: 0; transform: translateY(4px);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+.bm-row:last-child { border-bottom: none; }
+.bm-row.vis { opacity: 1; transform: translateY(0); }
+.bm-icon { font-size: 18px; flex-shrink: 0; width: 26px; text-align: center; }
+.bm-label { font-size: 12px; color: var(--ink2); flex: 1; }
+.bm-bar { flex: 0 0 70px; }
+.bm-bar-track { height: 4px; background: var(--border2); border-radius: 99px; }
+.bm-bar-fill { height: 100%; border-radius: 99px; transition: width 1.4s ease 0.6s; }
+.bm-val { font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 500; width: 36px; text-align: right; }
+
+/* Cost savings */
+.cs-row {
+  display: flex; align-items: center; gap: 0.7rem;
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  padding: 0.8rem 1rem; margin-bottom: 0.4rem;
+  opacity: 0; transform: translateY(4px);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+.cs-row.vis { opacity: 1; transform: translateY(0); }
+.cs-icon { font-size: 22px; flex-shrink: 0; }
+.cs-label { font-size: 12px; color: var(--muted); flex: 1; line-height: 1.4; }
+.cs-val { font-family: 'Fraunces', serif; font-size: 1.3rem; font-weight: 300; color: var(--sh); white-space: nowrap; }
+
+/* ══════════════════════════════════════════════════════
+   CITIZEN DASHBOARD
+══════════════════════════════════════════════════════ */
+.ct-right { width: 440px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface); overflow: hidden; }
+
+/* Street view — BIG */
+.sv-block {
+  height: 280px; flex-shrink: 0; position: relative; overflow: hidden;
+  background: #0c1520; border-bottom: 1px solid var(--border2);
+}
+.sv-block canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.sv-top-bar {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 10;
+  background: linear-gradient(to bottom, rgba(12,21,32,0.7), transparent);
+  padding: 10px 14px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.sv-location { font-family: 'DM Mono', monospace; font-size: 10px; color: rgba(255,255,255,0.6); }
+.sv-analysis-badge {
+  display: flex; align-items: center; gap: 0.4rem;
+  background: rgba(42,110,168,0.5); border: 1px solid rgba(42,110,168,0.4);
+  border-radius: 999px; padding: 3px 10px;
+  font-family: 'DM Mono', monospace; font-size: 9.5px; color: rgba(255,255,255,0.9);
+  backdrop-filter: blur(6px);
+}
+.sv-bot-bar {
+  position: absolute; bottom: 0; left: 0; right: 0; z-index: 10;
+  background: linear-gradient(to top, rgba(12,21,32,0.7), transparent);
+  padding: 10px 14px; display: flex; align-items: flex-end; justify-content: space-between;
+}
+.sv-compass { font-size: 18px; }
+.sv-enter-btn {
+  display: flex; align-items: center; gap: 0.4rem;
+  background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 999px; padding: 5px 14px;
+  font-family: 'Instrument Sans', sans-serif; font-size: 12px; font-weight: 500;
+  color: rgba(255,255,255,0.9); cursor: pointer;
+  backdrop-filter: blur(8px); transition: all 0.25s;
+}
+.sv-enter-btn:hover { background: rgba(255,255,255,0.22); }
+.sv-enter-btn.active { background: rgba(42,110,168,0.5); border-color: rgba(42,110,168,0.6); color: #fff; }
+
+/* Walk scores */
+.ct-scores { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.ct-score-cell {
+  padding: 0.65rem 0.7rem; border-right: 1px solid var(--border);
+  opacity: 0; transform: translateY(5px);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+.ct-score-cell:last-child { border-right: none; }
+.ct-score-cell.vis { opacity: 1; transform: translateY(0); }
+.ct-score-mode { font-family: 'DM Mono', monospace; font-size: 8.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+.ct-score-num { font-family: 'Fraunces', serif; font-size: 1.6rem; font-weight: 200; letter-spacing: -0.02em; line-height: 1.1; }
+.ct-score-lbl { font-size: 9px; color: var(--muted); line-height: 1.3; }
+.ct-score-bar { height: 2px; background: var(--border2); border-radius: 99px; margin-top: 4px; }
+.ct-score-bar-fill { height: 100%; border-radius: 99px; transition: width 1.2s ease 0.3s; }
+
+/* Tabs */
+.ct-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.ct-tab { padding: 9px 14px; font-size: 12px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; margin-bottom: -1px; }
+.ct-tab.active { color: var(--ct); border-bottom-color: var(--ct); font-weight: 500; }
+
+.ct-panel { flex: 1; overflow-y: auto; padding: 0.9rem 1.2rem; }
+.ct-panel::-webkit-scrollbar { width: 3px; }
+.ct-panel::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
+.ct-panel.hidden { display: none; }
+
+/* Service rows */
+.svc-row {
+  display: flex; align-items: center; gap: 0.7rem;
+  padding: 0.65rem 0; border-bottom: 1px solid var(--border);
+  opacity: 0; transform: translateX(-4px);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+.svc-row:last-child { border-bottom: none; }
+.svc-row.vis { opacity: 1; transform: translateX(0); }
+.svc-icon { font-size: 20px; flex-shrink: 0; width: 28px; text-align: center; }
+.svc-info { flex: 1; }
+.svc-name { font-size: 13px; font-weight: 500; color: var(--ink); }
+.svc-detail { font-size: 11px; color: var(--muted); margin-top: 1px; }
+.svc-dist { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted); text-align: right; }
+.svc-time { font-family: 'Fraunces', serif; font-size: 1.0rem; font-weight: 300; letter-spacing: -0.01em; text-align: right; }
+
+/* Env overlay (single analysis) */
+.env-analysis-block {
+  background: var(--ct2); border: 1px solid rgba(42,110,168,0.2);
+  border-radius: 10px; padding: 1rem; margin-bottom: 0.8rem;
+}
+.env-analysis-title { font-size: 13px; font-weight: 500; color: var(--ct); margin-bottom: 0.4rem; }
+.env-analysis-val { font-family: 'Fraunces', serif; font-size: 2rem; font-weight: 200; color: var(--ink); }
+.env-analysis-unit { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted); margin-left: 4px; }
+.env-analysis-note { font-size: 11px; color: var(--muted); margin-top: 0.3rem; line-height: 1.5; }
+
+/* Route quality */
+.rq-row {
+  display: flex; align-items: center; gap: 0.7rem;
+  padding: 0.6rem 0; border-bottom: 1px solid var(--border);
+}
+.rq-row:last-child { border-bottom: none; }
+.rq-icon { font-size: 18px; flex-shrink: 0; width: 26px; text-align: center; }
+.rq-label { font-size: 12px; color: var(--ink2); flex: 1; }
+.rq-val { font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 500; }
+.rq-good { color: #2a7a4a; }
+.rq-mid  { color: #9a7010; }
+.rq-bad  { color: #c03030; }
+
+/* ══════════════════════════════════════════════════════
+   AEC DASHBOARD
+══════════════════════════════════════════════════════ */
+.aec-right { width: 440px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface); overflow: hidden; }
+
+/* AEC inner tabs */
+.aec-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.aec-tab { padding: 9px 14px; font-size: 12px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; margin-bottom: -1px; }
+.aec-tab.active { color: var(--aec); border-bottom-color: var(--aec); font-weight: 500; }
+.aec-panel { flex: 1; overflow-y: auto; }
+.aec-panel::-webkit-scrollbar { width: 3px; }
+.aec-panel::-webkit-scrollbar-thumb { background: var(--border2); }
+.aec-panel.hidden { display: none; }
+
+/* Radar */
+.radar-wrap { padding: 1rem 1.2rem; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.radar-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.7rem; }
+.radar-title-text { font-size: 12px; font-weight: 500; color: var(--ink); }
+.radar-legend { display: flex; gap: 1rem; }
+.rl { display: flex; align-items: center; gap: 0.4rem; }
+.rl-dot { width: 8px; height: 8px; border-radius: 50%; }
+.rl-lbl { font-family: 'DM Mono', monospace; font-size: 9px; color: var(--muted); }
+
+/* Bar comparison */
+.bar-comp-row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.7rem; }
+.bc-lbl { font-family: 'DM Mono', monospace; font-size: 9.5px; color: var(--muted); width: 72px; flex-shrink: 0; text-transform: uppercase; letter-spacing: 0.06em; }
+.bc-group { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.bc-bar-row { display: flex; align-items: center; gap: 6px; }
+.bc-bar { height: 8px; border-radius: 4px; transition: width 1.4s cubic-bezier(.4,0,.2,1) 0.5s; min-width: 2px; }
+.bc-num { font-family: 'DM Mono', monospace; font-size: 9.5px; color: var(--muted); white-space: nowrap; width: 52px; }
+
+/* Analysis summary */
+.analysis-box {
+  background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--aec);
+  border-radius: 10px; padding: 1rem;
+  font-size: 12.5px; color: var(--muted); line-height: 1.75;
+  opacity: 0; transition: opacity 0.5s ease;
+}
+.analysis-box.vis { opacity: 1; }
+.analysis-box strong { color: var(--ink); }
+
+/* Strategy cards */
+.strat-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 0.9rem 1rem; margin-bottom: 0.5rem;
+  opacity: 0; transform: translateY(5px);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+.strat-card.vis { opacity: 1; transform: translateY(0); }
+.strat-top { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.35rem; }
+.strat-n { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--aec); }
+.strat-title { font-size: 13px; font-weight: 500; color: var(--ink); }
+.strat-body { font-size: 12px; color: var(--muted); line-height: 1.65; }
+.strat-tag { display: inline-flex; background: var(--aec2); color: var(--aec); font-family: 'DM Mono', monospace; font-size: 9px; padding: 2px 8px; border-radius: 999px; margin-top: 0.4rem; }
+
+/* Tree upload placeholder */
+.upload-placeholder {
+  border: 1.5px dashed var(--border2); border-radius: 12px;
+  padding: 2rem; text-align: center; margin: 1rem;
+  cursor: pointer; transition: all 0.2s;
+}
+.upload-placeholder:hover { border-color: var(--aec); background: var(--aec3); }
+.upload-icon { font-size: 32px; margin-bottom: 0.5rem; }
+.upload-title { font-size: 14px; font-weight: 500; color: var(--ink); margin-bottom: 0.3rem; }
+.upload-sub { font-size: 12px; color: var(--muted); }
+
+/* Score color helpers */
+.c-red { color: var(--score-red); }
+.c-ora { color: var(--score-ora); }
+.c-yel { color: var(--score-yel); }
+.c-lg  { color: var(--score-lg); }
+.c-dg  { color: var(--score-dg); }
+
+/* Utilities */
+.mt-sm { margin-top: 0.6rem; }
+.pad-block { padding: 0.9rem 1.2rem; }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════
+     LANDING
+══════════════════════════════════════════════════════ -->
+<div class="screen" id="screen-landing">
+  <div class="land-grid"></div>
+  <div class="land-glow"></div>
+
+  <div class="land-inner">
+    <div class="wordmark">city<em>RAG</em></div>
+    <div class="tagline">Urban Environmental Intelligence Platform</div>
+
+    <div class="prompt-shell" id="prompt-shell">
+      <div class="prompt-top">
+        <div class="prompt-label">Describe your question or project</div>
+        <div class="detect-indicator" id="detect-indicator">
+          <div class="detect-dot"></div>
+          <span id="detect-label">Awaiting input…</span>
+        </div>
+      </div>
+      <div class="prompt-row">
+        <input class="main-input" id="main-input" type="text"
+          placeholder="e.g. Where is outdoor thermal comfort best for pedestrians this summer?"
+          autocomplete="off">
+        <button class="run-btn" onclick="runAnalysis()">Analyse →</button>
+      </div>
+      <div class="clarify-box" id="clarify-box">
+        <span id="clarify-text">Your question could match more than one profile. Who are you?</span>
+        <div class="clarify-pills">
+          <button class="clarify-pill" onclick="forceUser('stakeholder')">🏛 Stakeholder / decision-maker</button>
+          <button class="clarify-pill" onclick="forceUser('citizen')">🚶 Private citizen / everyday use</button>
+          <button class="clarify-pill" onclick="forceUser('aec')">📐 AEC expert / urban designer</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="example-row">
+      <div class="ep-card sh" onclick="fillPrompt(this)">
+        <div class="ep-type sh">🏛 Stakeholder</div>
+        <div class="ep-text">Assess outdoor thermal comfort and solar radiation performance for the public space at Bryghuspladsen, Copenhagen — summer conditions</div>
+      </div>
+      <div class="ep-card ct" onclick="fillPrompt(this)">
+        <div class="ep-type ct">🚶 Citizen</div>
+        <div class="ep-text">Find me the most shaded and comfortable cycling route through Copenhagen city centre right now</div>
+      </div>
+      <div class="ep-card aec" onclick="fillPrompt(this)">
+        <div class="ep-type aec">📐 AEC Expert</div>
+        <div class="ep-text">Analyse tree placement opportunities and vegetation cooling potential to reduce urban heat island intensity near Nørreport Station</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     STATUS
+══════════════════════════════════════════════════════ -->
+<div class="screen hidden" id="screen-status">
+  <div class="status-wordmark">city<em>RAG</em></div>
+  <div class="status-sub">Running agentic workflow</div>
+
+  <div class="detect-badge" id="detect-badge">
+    <span id="badge-icon">◆</span>&nbsp;<span id="badge-label">Detecting profile…</span>
+  </div>
+
+  <div class="agent-steps" id="agent-steps">
+    <div class="astep"><div class="astep-dot"></div><span class="as-t">Classifier agent — intent &amp; user profile detection</span></div>
+    <div class="astep"><div class="astep-dot"></div><span class="as-t">get_buildings() → OpenStreetMap geometry</span></div>
+    <div class="astep"><div class="astep-dot"></div><span class="as-t">get_weather_data() → EPW climate file fetch</span></div>
+    <div class="astep"><div class="astep-dot"></div><span class="as-t" id="sim1-label">run_simulation() → Infrared.city API</span></div>
+    <div class="astep"><div class="astep-dot"></div><span class="as-t" id="sim2-label">run_secondary_sim() → Infrared.city API</span></div>
+    <div class="astep"><div class="astep-dot"></div><span class="as-t">zone_statistics() → score normalisation 0 → 1</span></div>
+    <div class="astep"><div class="astep-dot"></div><span class="as-t">Synthesiser agent — insights &amp; recommendations</span></div>
+    <div class="astep"><div class="astep-dot"></div><span class="as-t">Routing to personalised dashboard…</span></div>
+  </div>
+
+  <div class="progress-track">
+    <div class="progress-fill" id="progress-fill"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     STAKEHOLDER DASHBOARD
+══════════════════════════════════════════════════════ -->
+<div class="dashboard hidden" id="dash-stakeholder">
+  <div class="dash-top">
+    <div class="dash-logo">city<em>RAG</em></div>
+    <div class="dash-sep"></div>
+    <div class="dash-title">Bryghuspladsen 8, Copenhagen — Environmental Performance Assessment</div>
+    <div class="dash-cat-pill" style="color:var(--sh);border-color:rgba(200,96,26,0.35);background:var(--sh3)">🏛 Stakeholder</div>
+    <button class="new-q-btn" onclick="goHome()">+ New question</button>
+  </div>
+
+  <div class="dash-body">
+    <div class="map-area" id="sh-map-area">
+      <canvas id="sh-mapCanvas"></canvas>
+      <canvas id="sh-rasterCanvas" style="mix-blend-mode:multiply;opacity:0;transition:opacity 1.2s ease;position:absolute;inset:0;width:100%;height:100%"></canvas>
+      <div class="welcome-banner">
+        <div class="wb-greeting">Welcome, Stakeholder</div>
+        <div class="wb-sub">cityRAG · Environmental Performance Dashboard</div>
+      </div>
+      <div class="map-fade-right"></div>
+    </div>
+    <div class="split-div"></div>
+    <div class="right-panel" id="sh-right">
+
+      <!-- Score -->
+      <div class="sh-score-block">
+        <div class="sh-score-main">
+          <div class="sh-score-num c-lg" id="sh-score-num">0.72</div>
+          <div class="sh-score-right">
+            <div class="sh-score-label">Composite Urban Performance Score</div>
+            <div class="sh-score-verdict" id="sh-verdict">Good — strong livability baseline</div>
+            <div class="sh-score-desc" id="sh-desc">Score: 0.7–0.9 · High usability, minor optimisation possible</div>
+          </div>
+        </div>
+        <div class="score-bar-stack">
+          <div class="score-bar-track">
+            <div class="score-bar-fill" id="sh-bar" style="background:linear-gradient(90deg,var(--score-red),var(--score-ora),var(--score-yel),var(--score-lg),var(--score-dg))"></div>
+          </div>
+          <div class="score-legend">
+            <div style="background:var(--score-red)"></div>
+            <div style="background:var(--score-ora)"></div>
+            <div style="background:var(--score-yel)"></div>
+            <div style="background:var(--score-lg)"></div>
+            <div style="background:var(--score-dg)"></div>
+          </div>
+          <div class="score-ranges">
+            <span>0.0 Critical</span><span>0.3 Poor</span><span>0.5 Sufficient</span><span>0.7 Good</span><span>1.0 Excellent</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sim selector -->
+      <div class="sim-strip">
+        <button class="sim-chip active" onclick="shSim(this,'thermal')">Thermal UTCI</button>
+        <button class="sim-chip" onclick="shSim(this,'wind')">Wind Speed</button>
+        <button class="sim-chip" onclick="shSim(this,'solar')">Solar Radiation</button>
+        <button class="sim-chip" onclick="shSim(this,'svf')">Sky View Factor</button>
+        <button class="sim-chip" onclick="shSim(this,'daylight')">Daylight Avail.</button>
+        <button class="sim-chip" onclick="shSim(this,'shadow')">Shadow / Sun hrs</button>
+        <button class="sim-chip" onclick="shSim(this,'wind_comfort')">Wind Comfort</button>
+      </div>
+
+      <!-- KPIs -->
+      <div class="rp-scroll">
+        <div class="kpi-header">KEY PERFORMANCE<br>INDICATORS</div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card" id="sh-k0">
+            <span class="kpi-icon">🌡</span>
+            <div class="kpi-name">Thermal Comfort</div>
+            <div class="kpi-val">21.4 <span class="kpi-unit">°C UTCI</span></div>
+            <div class="kpi-note">Range 18–26°C = comfort zone</div>
+            <div class="kpi-bar"><div class="kpi-bar-fill" style="width:78%;background:var(--score-lg)"></div></div>
+          </div>
+          <div class="kpi-card" id="sh-k1">
+            <span class="kpi-icon">💨</span>
+            <div class="kpi-name">Wind Speed</div>
+            <div class="kpi-val">2.8 <span class="kpi-unit">m/s</span></div>
+            <div class="kpi-note">Optimum &lt; 3 m/s pedestrian</div>
+            <div class="kpi-bar"><div class="kpi-bar-fill" style="width:88%;background:var(--score-dg)"></div></div>
+          </div>
+          <div class="kpi-card" id="sh-k2">
+            <span class="kpi-icon">☀️</span>
+            <div class="kpi-name">Solar Radiation</div>
+            <div class="kpi-val">342 <span class="kpi-unit">W/m²</span></div>
+            <div class="kpi-note">200–400 W/m² = pedestrian comfort</div>
+            <div class="kpi-bar"><div class="kpi-bar-fill" style="width:70%;background:var(--score-lg)"></div></div>
+          </div>
+          <div class="kpi-card" id="sh-k3">
+            <span class="kpi-icon">🌤</span>
+            <div class="kpi-name">Sky View Factor</div>
+            <div class="kpi-val">0.74 <span class="kpi-unit">SVF</span></div>
+            <div class="kpi-note">Optimum &gt; 0.7 · good openness</div>
+            <div class="kpi-bar"><div class="kpi-bar-fill" style="width:74%;background:var(--score-lg)"></div></div>
+          </div>
+          <div class="kpi-card" id="sh-k4">
+            <span class="kpi-icon">💡</span>
+            <div class="kpi-name">Daylight Availability</div>
+            <div class="kpi-val">64 <span class="kpi-unit">%</span></div>
+            <div class="kpi-note">Optimum &gt; 50% of hours</div>
+            <div class="kpi-bar"><div class="kpi-bar-fill" style="width:64%;background:var(--score-lg)"></div></div>
+          </div>
+          <div class="kpi-card" id="sh-k5">
+            <span class="kpi-icon">🌑</span>
+            <div class="kpi-name">Direct Sun Hours</div>
+            <div class="kpi-val">3.2 <span class="kpi-unit">h/day</span></div>
+            <div class="kpi-note">2–4 h/day = seasonal balance</div>
+            <div class="kpi-bar"><div class="kpi-bar-fill" style="width:70%;background:var(--score-lg)"></div></div>
+          </div>
+          <div class="kpi-card" id="sh-k6">
+            <span class="kpi-icon">🌬</span>
+            <div class="kpi-name">Wind Comfort</div>
+            <div class="kpi-val">B–C <span class="kpi-unit">Lawson</span></div>
+            <div class="kpi-note">Suitable for sitting &amp; strolling</div>
+            <div class="kpi-bar"><div class="kpi-bar-fill" style="width:65%;background:var(--score-yel)"></div></div>
+          </div>
+          <div class="kpi-card" id="sh-k7">
+            <span class="kpi-icon">📊</span>
+            <div class="kpi-name">Comfort Statistics</div>
+            <div class="kpi-val">58 <span class="kpi-unit">%</span></div>
+            <div class="kpi-note">% of time in comfort range</div>
+            <div class="kpi-bar"><div class="kpi-bar-fill" style="width:58%;background:var(--score-yel)"></div></div>
+          </div>
+        </div>
+
+        <div class="sec-label">Health &amp; Economic Impact</div>
+        <div class="cs-row" id="sh-cs0"><div class="cs-icon">❤️‍🩹</div><div class="cs-label">Estimated reduction in heat-stress health risk vs. unimproved baseline</div><div class="cs-val">−34%</div></div>
+        <div class="cs-row" id="sh-cs1"><div class="cs-icon">⚡</div><div class="cs-label">Cooling energy reduction in adjacent buildings from reduced solar gain</div><div class="cs-val">−18 kWh/m²</div></div>
+        <div class="cs-row" id="sh-cs2"><div class="cs-icon">🌳</div><div class="cs-label">Projected increase in space utilisation rate (outdoor dwell time)</div><div class="cs-val">+28%</div></div>
+
+        <div class="sec-label">Urban Benchmarks</div>
+        <div class="bm-row" id="sh-bm0"><div class="bm-icon">🚶</div><div class="bm-label">15-Minute City — service accessibility</div><div class="bm-bar"><div class="bm-bar-track"><div class="bm-bar-fill" style="width:88%;background:var(--score-dg)"></div></div></div><div class="bm-val c-dg">0.88</div></div>
+        <div class="bm-row" id="sh-bm1"><div class="bm-icon">🌡</div><div class="bm-label">Pedestrian thermal comfort target (summer peak)</div><div class="bm-bar"><div class="bm-bar-track"><div class="bm-bar-fill" style="width:72%;background:var(--score-lg)"></div></div></div><div class="bm-val c-lg">0.72</div></div>
+        <div class="bm-row" id="sh-bm2"><div class="bm-icon">💨</div><div class="bm-label">Wind comfort Lawson criterion (pedestrian)</div><div class="bm-bar"><div class="bm-bar-track"><div class="bm-bar-fill" style="width:65%;background:var(--score-yel)"></div></div></div><div class="bm-val c-yel">0.65</div></div>
+        <div class="bm-row" id="sh-bm3"><div class="bm-icon">🌆</div><div class="bm-label">Urban Heat Island intensity reduction vs. reference</div><div class="bm-bar"><div class="bm-bar-track"><div class="bm-bar-fill" style="width:55%;background:var(--score-ora)"></div></div></div><div class="bm-val c-ora">0.55</div></div>
+
+        <div class="sec-label">How to raise this score — Recommendations</div>
+        <div class="rec-card" id="sh-r0">
+          <div class="rec-card-top"><span class="rec-n">01</span><span class="rec-title">Reduce wind exposure on the SW edge</span></div>
+          <div class="rec-body">Wind speed exceeds the 3 m/s pedestrian comfort threshold along the harbour-facing south-west perimeter. Installing a 3 m perforated windbreak screen would reduce local wind speed by approximately 40%, raising the wind comfort score from C to B (Lawson) and improving the composite score by an estimated +0.10.</div>
+          <div class="rec-delta">↑ Score +0.10 · Wind KPI</div>
+        </div>
+        <div class="rec-card" id="sh-r1">
+          <div class="rec-card-top"><span class="rec-n">02</span><span class="rec-title">Introduce deciduous tree canopy on the east side</span></div>
+          <div class="rec-body">Summer UTCI at the east-facing plaza reaches 28–30°C during peak hours, exceeding the thermal comfort threshold. Planting 6–8 deciduous trees (crown diameter 6m) would reduce mean radiant temperature by 4–6°C, lowering UTCI to the 22–26°C comfort range without compromising winter solar access below the 50% daylight threshold.</div>
+          <div class="rec-delta">↑ Score +0.08 · Thermal UTCI KPI</div>
+        </div>
+        <div class="rec-card" id="sh-r2">
+          <div class="rec-card-top"><span class="rec-n">03</span><span class="rec-title">Relocate primary seating to the NE quadrant</span></div>
+          <div class="rec-body">Spatial analysis shows the NE zone maintains a consistent comfort score of 0.84 across all seasons, benefiting from wind shelter and optimal solar exposure. Repositioning the main seating programme to this quadrant would immediately improve perceived comfort and space utilisation without any infrastructure investment.</div>
+          <div class="rec-delta">↑ Score +0.06 · Comfort Statistics KPI</div>
+        </div>
+        <div class="rec-card" id="sh-r3">
+          <div class="rec-card-top"><span class="rec-n">04</span><span class="rec-title">Apply high-albedo permeable paving on the south plaza</span></div>
+          <div class="rec-body">The south-facing paved surface currently stores and re-radiates significant solar heat during evening hours, extending thermal discomfort beyond sunset. Replacing with high-solar-reflectance permeable paving (SRI ≥ 29) would reduce the stored heat re-radiation by ~22%, contributing a direct improvement to the thermal comfort statistics score.</div>
+          <div class="rec-delta">↑ Score +0.05 · Solar Radiation KPI</div>
+        </div>
+
+        <div style="height:1.5rem"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     CITIZEN DASHBOARD
+══════════════════════════════════════════════════════ -->
+<div class="dashboard hidden" id="dash-citizen">
+  <div class="dash-top">
+    <div class="dash-logo">city<em>RAG</em></div>
+    <div class="dash-sep"></div>
+    <div class="dash-title">Best shaded cycling route — Copenhagen city centre</div>
+    <div class="dash-cat-pill" style="color:var(--ct);border-color:rgba(42,110,168,0.35);background:var(--ct3)">🚶 Citizen</div>
+    <button class="new-q-btn" onclick="goHome()">+ New question</button>
+  </div>
+
+  <div class="dash-body">
+    <div class="map-area" id="ct-map-area">
+      <canvas id="ct-mapCanvas"></canvas>
+      <canvas id="ct-rasterCanvas" style="mix-blend-mode:multiply;opacity:0;transition:opacity 1.2s ease;position:absolute;inset:0;width:100%;height:100%"></canvas>
+      <div class="welcome-banner">
+        <div class="wb-greeting">Welcome, Explorer</div>
+        <div class="wb-sub">cityRAG · Citizen Mobility &amp; Comfort Dashboard</div>
+      </div>
+      <div class="map-fade-right"></div>
+    </div>
+    <div class="split-div"></div>
+    <div class="ct-right">
+
+      <!-- Street view viewport — BIG -->
+      <div class="sv-block">
+        <canvas id="sv-canvas"></canvas>
+        <div class="sv-top-bar">
+          <div class="sv-location">📍 Bryghuspladsen, Copenhagen · 55.6723°N</div>
+          <div class="sv-analysis-badge">💨 Wind speed analysis active</div>
+        </div>
+        <div class="sv-bot-bar">
+          <div class="sv-compass">🧭 NW</div>
+          <button class="sv-enter-btn" id="sv-enter-btn" onclick="toggleWalk()">
+            👁 Enter space
+          </button>
+        </div>
+      </div>
+
+      <!-- Walk scores -->
+      <div class="ct-scores">
+        <div class="ct-score-cell" id="ct-ws0">
+          <div class="ct-score-mode">🚶 Walk</div>
+          <div class="ct-score-num" style="color:var(--score-dg)">87</div>
+          <div class="ct-score-lbl">Walker's Paradise</div>
+          <div class="ct-score-bar"><div class="ct-score-bar-fill" style="width:87%;background:var(--score-dg)"></div></div>
+        </div>
+        <div class="ct-score-cell" id="ct-ws1">
+          <div class="ct-score-mode">🚴 Bike</div>
+          <div class="ct-score-num" style="color:var(--ct)">74</div>
+          <div class="ct-score-lbl">Very Bikeable</div>
+          <div class="ct-score-bar"><div class="ct-score-bar-fill" style="width:74%;background:var(--ct)"></div></div>
+        </div>
+        <div class="ct-score-cell" id="ct-ws2">
+          <div class="ct-score-mode">🚗 Drive</div>
+          <div class="ct-score-num" style="color:var(--score-yel)">52</div>
+          <div class="ct-score-lbl">Some car use needed</div>
+          <div class="ct-score-bar"><div class="ct-score-bar-fill" style="width:52%;background:var(--score-yel)"></div></div>
+        </div>
+        <div class="ct-score-cell" id="ct-ws3">
+          <div class="ct-score-mode">🚌 Transit</div>
+          <div class="ct-score-num" style="color:var(--score-dg)">91</div>
+          <div class="ct-score-lbl">Excellent transit</div>
+          <div class="ct-score-bar"><div class="ct-score-bar-fill" style="width:91%;background:var(--score-dg)"></div></div>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="ct-tabs">
+        <div class="ct-tab active" onclick="ctTab(this,'services')">Nearby Services</div>
+        <div class="ct-tab" onclick="ctTab(this,'env')">Env. Analysis</div>
+        <div class="ct-tab" onclick="ctTab(this,'route')">Route Quality</div>
+      </div>
+
+      <!-- Services panel -->
+      <div class="ct-panel" id="ct-panel-services">
+        <div class="sec-label" style="margin-top:0.6rem">Service proximity · walking time</div>
+        <div class="svc-row" id="ct-s0">
+          <div class="svc-icon">☕</div>
+          <div class="svc-info"><div class="svc-name">The Coffee Collective</div><div class="svc-detail">Specialty coffee · outdoor seating · shade</div></div>
+          <div><div class="svc-dist">380 m</div><div class="svc-time" style="color:var(--score-dg)">4 min</div></div>
+        </div>
+        <div class="svc-row" id="ct-s1">
+          <div class="svc-icon">🌳</div>
+          <div class="svc-info"><div class="svc-name">Kongens Have (King's Garden)</div><div class="svc-detail">Public park · shaded alleys · benches</div></div>
+          <div><div class="svc-dist">900 m</div><div class="svc-time" style="color:var(--score-dg)">11 min</div></div>
+        </div>
+        <div class="svc-row" id="ct-s2">
+          <div class="svc-icon">🚉</div>
+          <div class="svc-info"><div class="svc-name">Nørreport Station</div><div class="svc-detail">Metro · S-train · bus hub</div></div>
+          <div><div class="svc-dist">600 m</div><div class="svc-time" style="color:var(--score-dg)">7 min</div></div>
+        </div>
+        <div class="svc-row" id="ct-s3">
+          <div class="svc-icon">🍽</div>
+          <div class="svc-info"><div class="svc-name">Torvehallerne Market</div><div class="svc-detail">Food market · semi-covered · high footfall</div></div>
+          <div><div class="svc-dist">650 m</div><div class="svc-time" style="color:var(--score-dg)">8 min</div></div>
+        </div>
+        <div class="svc-row" id="ct-s4">
+          <div class="svc-icon">🏥</div>
+          <div class="svc-info"><div class="svc-name">Rigshospitalet</div><div class="svc-detail">University hospital · 24h emergency</div></div>
+          <div><div class="svc-dist">1.8 km</div><div class="svc-time" style="color:var(--score-yel)">22 min</div></div>
+        </div>
+        <div class="svc-row" id="ct-s5">
+          <div class="svc-icon">🛒</div>
+          <div class="svc-info"><div class="svc-name">Irma Nørreport</div><div class="svc-detail">Grocery · daily essentials</div></div>
+          <div><div class="svc-dist">550 m</div><div class="svc-time" style="color:var(--score-dg)">7 min</div></div>
+        </div>
+        <div class="svc-row" id="ct-s6">
+          <div class="svc-icon">🏛</div>
+          <div class="svc-info"><div class="svc-name">Statens Museum for Kunst</div><div class="svc-detail">National gallery · free entry · café</div></div>
+          <div><div class="svc-dist">1.1 km</div><div class="svc-time" style="color:var(--score-lg)">13 min</div></div>
+        </div>
+      </div>
+
+      <!-- Env analysis panel -->
+      <div class="ct-panel hidden" id="ct-panel-env">
+        <div class="sec-label" style="margin-top:0.6rem">Active environmental analysis</div>
+        <div class="env-analysis-block">
+          <div class="env-analysis-title">💨 Wind Speed Analysis (Infrared.city)</div>
+          <div><span class="env-analysis-val">2.4</span><span class="env-analysis-unit">m/s mean at pedestrian level</span></div>
+          <div class="env-analysis-note">Wind conditions are within the pedestrian comfort range (&lt;3 m/s). The recommended cycling route avoids the exposed harbour-side corridor where wind peaks at 4.1 m/s. The sheltered inland route via Gothersgade maintains wind below 2.0 m/s for 78% of its length.</div>
+        </div>
+        <div class="sec-label">Weather forecast (today)</div>
+        <div class="rq-row"><div class="rq-icon">🌤</div><div class="rq-label">Partly cloudy · 14°C ambient</div><div class="rq-val rq-good">Comfortable</div></div>
+        <div class="rq-row"><div class="rq-icon">🌬</div><div class="rq-label">Wind: SW 2.4 m/s (gusts 3.8)</div><div class="rq-val rq-good">Low</div></div>
+        <div class="rq-row"><div class="rq-icon">💧</div><div class="rq-label">Humidity: 68%</div><div class="rq-val rq-good">Comfortable</div></div>
+        <div class="rq-row"><div class="rq-icon">☀️</div><div class="rq-label">UV Index: 3</div><div class="rq-val rq-good">Moderate</div></div>
+        <div class="rq-row"><div class="rq-icon">🌡</div><div class="rq-label">UTCI estimated</div><div class="rq-val rq-good">~16°C (slight cool)</div></div>
+      </div>
+
+      <!-- Route quality panel -->
+      <div class="ct-panel hidden" id="ct-panel-route">
+        <div class="sec-label" style="margin-top:0.6rem">Route quality factors — recommended cycling route</div>
+        <div class="rq-row"><div class="rq-icon">🌑</div><div class="rq-label">Shadow coverage along route</div><div class="rq-val rq-good">71%</div></div>
+        <div class="rq-row"><div class="rq-icon">🌡</div><div class="rq-label">Mean UTCI along route</div><div class="rq-val rq-good">16°C (slight cool)</div></div>
+        <div class="rq-row"><div class="rq-icon">☀️</div><div class="rq-label">Direct sun exposure sections</div><div class="rq-val rq-mid">29% of route</div></div>
+        <div class="rq-row"><div class="rq-icon">💨</div><div class="rq-label">Peak wind speed on route</div><div class="rq-val rq-mid">3.1 m/s (harbour section)</div></div>
+        <div class="rq-row"><div class="rq-icon">🛣</div><div class="rq-label">Dedicated cycle lane</div><div class="rq-val rq-good">84% of total distance</div></div>
+        <div class="rq-row"><div class="rq-icon">🚦</div><div class="rq-label">Intersection density</div><div class="rq-val rq-mid">Medium — 6 crossings/km</div></div>
+        <div class="rq-row"><div class="rq-icon">⛰</div><div class="rq-label">Elevation change</div><div class="rq-val rq-good">+3 m · essentially flat</div></div>
+        <div class="rq-row"><div class="rq-icon">⏱</div><div class="rq-label">Estimated travel time</div><div class="rq-val rq-good">~8 min by bike</div></div>
+        <div class="rq-row"><div class="rq-icon">🌿</div><div class="rq-label">Green infrastructure coverage</div><div class="rq-val rq-good">Trees alongside 52%</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     AEC EXPERT DASHBOARD
+══════════════════════════════════════════════════════ -->
+<div class="dashboard hidden" id="dash-aec">
+  <div class="dash-top">
+    <div class="dash-logo">city<em>RAG</em></div>
+    <div class="dash-sep"></div>
+    <div class="dash-title">Vegetation cooling analysis — heat island assessment · Nørreport Station area</div>
+    <div class="dash-cat-pill" style="color:var(--aec);border-color:rgba(42,138,90,0.35);background:var(--aec3)">📐 AEC Expert</div>
+    <button class="new-q-btn" onclick="goHome()">+ New question</button>
+  </div>
+
+  <div class="dash-body">
+    <div class="map-area" id="aec-map-area">
+      <canvas id="aec-mapCanvas"></canvas>
+      <canvas id="aec-rasterCanvas" style="mix-blend-mode:multiply;opacity:0;transition:opacity 1.2s ease;position:absolute;inset:0;width:100%;height:100%"></canvas>
+      <div class="welcome-banner">
+        <div class="wb-greeting">Welcome, Expert</div>
+        <div class="wb-sub">cityRAG · AEC Technical Analysis Dashboard</div>
+      </div>
+      <div class="map-fade-right"></div>
+    </div>
+    <div class="split-div"></div>
+    <div class="aec-right">
+
+      <!-- AEC tabs -->
+      <div class="aec-tabs">
+        <div class="aec-tab active" onclick="aecTab(this,'radar')">Ecosystem Services</div>
+        <div class="aec-tab" onclick="aecTab(this,'comparison')">Sim Comparison</div>
+        <div class="aec-tab" onclick="aecTab(this,'trees')">Tree Placement</div>
+      </div>
+
+      <!-- Radar tab -->
+      <div class="aec-panel" id="aec-panel-radar" style="overflow-y:auto">
+        <div class="radar-wrap">
+          <div class="radar-header">
+            <div class="radar-title-text">Ecosystem Services — Baseline vs. Vegetation-Enhanced</div>
+            <div class="radar-legend">
+              <div class="rl"><div class="rl-dot" style="background:rgba(42,138,90,0.3);border:1px solid rgba(42,138,90,0.5)"></div><div class="rl-lbl">Baseline</div></div>
+              <div class="rl"><div class="rl-dot" style="background:var(--aec)"></div><div class="rl-lbl">+ Trees</div></div>
+            </div>
+          </div>
+          <canvas id="aec-radar" width="396" height="220"></canvas>
+        </div>
+
+        <div style="padding:0 1.2rem 1rem">
+          <div class="sec-label" style="margin-top:0">Analysis Summary — Summer Conditions</div>
+          <div class="analysis-box" id="aec-summary">
+            The site currently exhibits an urban heat island intensity of <strong>+4.2°C</strong> relative to the rural reference, driven by high surface coverage, limited vegetation, and an elevated sky view factor (SVF 0.91) exposing surfaces to direct solar load throughout the day. Peak surface temperatures reach <strong>36–38°C</strong> in July, resulting in UTCI values of 30–34°C during afternoon hours — well beyond the thermal comfort threshold.<br><br>
+            Simulated introduction of <strong>18 deciduous trees</strong> (Tilia cordata, canopy diameter 6–8 m, placed at 8 m spacing) reduces mean radiant temperature by <strong>−6.4°C</strong>, brings UTCI into the 22–26°C comfort range for 74% of occupied hours, and provides <strong>38 W/m² of evapotranspirative cooling</strong>. Estimated CO₂ sequestration: <strong>12.4 t CO₂/year</strong>. Biodiversity index improves from 0.18 to 0.54 (BREEAM baseline reference).
+          </div>
+
+          <div class="sec-label">Design strategies &amp; recommendations</div>
+          <div class="strat-card" id="aec-s0">
+            <div class="strat-top"><span class="strat-n">01</span><span class="strat-title">Priority zone: SE corner — highest heat load</span></div>
+            <div class="strat-body">SE surfaces reach 36–38°C surface temperature during peak summer afternoon (14:00–17:00 CET). Plant 5 Tilia cordata at 8 m spacing to provide maximum mid-afternoon shading and maximise evapotranspirative cooling contribution. Expected UTCI reduction: −5 to −7°C in this zone.</div>
+            <div class="strat-tag">Thermal comfort · UTCI</div>
+          </div>
+          <div class="strat-card" id="aec-s1">
+            <div class="strat-top"><span class="strat-n">02</span><span class="strat-title">Linear deciduous buffer along the main pedestrian axis</span></div>
+            <div class="strat-body">A NW–SE tree alignment along the primary movement corridor creates a continuous shaded pathway that reduces summer solar radiation exposure by 55–70% while preserving winter solar access (sun angle &lt;20°). Species selection: deciduous with crown lift ≥2.5 m for unobstructed passage.</div>
+            <div class="strat-tag">Solar radiation · Shadow analysis</div>
+          </div>
+          <div class="strat-card" id="aec-s2">
+            <div class="strat-top"><span class="strat-n">03</span><span class="strat-title">Biodiverse understory to raise biodiversity score</span></div>
+            <div class="strat-body">Beneath the tree canopies, introduce a native shrub and groundcover layer (e.g. Geranium sanguineum, Festuca glauca). This raises the biodiversity index from 0.54 to an estimated 0.72, above the threshold for ecological network connectivity at the neighbourhood scale.</div>
+            <div class="strat-tag">Biodiversity · Air quality</div>
+          </div>
+          <div class="strat-card" id="aec-s3">
+            <div class="strat-top"><span class="strat-n">04</span><span class="strat-title">High-albedo permeable paving in non-planted zones</span></div>
+            <div class="strat-body">Apply high-solar-reflectance permeable paving (albedo ≥ 0.40) in the remaining hard-surface areas to reduce stored heat re-radiation. This lowers the evening UTCI by an additional 1–2°C and contributes to stormwater management — reducing runoff by approximately 60% during peak rainfall events.</div>
+            <div class="strat-tag">Solar radiation · Urban heat island</div>
+          </div>
+          <div class="strat-card" id="aec-s4">
+            <div class="strat-top"><span class="strat-n">05</span><span class="strat-title">Green corridor connection to regional network</span></div>
+            <div class="strat-body">Align planting strategy with the regional green corridor connecting toward Fælledparken (1.8 km NE). This enables habitat connectivity and allows the urban canopy to function as part of a cooling network rather than isolated interventions, amplifying the urban heat island mitigation effect at district scale.</div>
+            <div class="strat-tag">Climate regulation · Human well-being</div>
+          </div>
+          <div style="height:1rem"></div>
+        </div>
+      </div>
+
+      <!-- Comparison tab -->
+      <div class="aec-panel hidden" id="aec-panel-comparison" style="overflow-y:auto;padding:1rem 1.2rem">
+        <div class="sec-label" style="margin-top:0">Raw simulation data — Baseline vs. Vegetation-Enhanced</div>
+        <div style="margin-bottom:1rem">
+          <div class="bar-comp-row">
+            <div class="bc-lbl">Surface Temp</div>
+            <div class="bc-group">
+              <div class="bc-bar-row"><div class="bc-bar" id="bc-b0" style="width:0%;background:var(--score-red)"></div><div class="bc-num">36.2°C baseline</div></div>
+              <div class="bc-bar-row"><div class="bc-bar" id="bc-e0" style="width:0%;background:var(--aec)"></div><div class="bc-num">29.8°C + trees</div></div>
+            </div>
+          </div>
+          <div class="bar-comp-row">
+            <div class="bc-lbl">UTCI mean</div>
+            <div class="bc-group">
+              <div class="bc-bar-row"><div class="bc-bar" id="bc-b1" style="width:0%;background:var(--score-red)"></div><div class="bc-num">32.1°C baseline</div></div>
+              <div class="bc-bar-row"><div class="bc-bar" id="bc-e1" style="width:0%;background:var(--aec)"></div><div class="bc-num">24.4°C + trees</div></div>
+            </div>
+          </div>
+          <div class="bar-comp-row">
+            <div class="bc-lbl">SVF mean</div>
+            <div class="bc-group">
+              <div class="bc-bar-row"><div class="bc-bar" id="bc-b2" style="width:0%;background:var(--score-ora)"></div><div class="bc-num">0.91 baseline</div></div>
+              <div class="bc-bar-row"><div class="bc-bar" id="bc-e2" style="width:0%;background:var(--aec)"></div><div class="bc-num">0.63 + trees</div></div>
+            </div>
+          </div>
+          <div class="bar-comp-row">
+            <div class="bc-lbl">ET cooling</div>
+            <div class="bc-group">
+              <div class="bc-bar-row"><div class="bc-bar" id="bc-b3" style="width:0%;background:var(--card2)"></div><div class="bc-num">0 W/m² baseline</div></div>
+              <div class="bc-bar-row"><div class="bc-bar" id="bc-e3" style="width:0%;background:var(--aec)"></div><div class="bc-num">38 W/m² + trees</div></div>
+            </div>
+          </div>
+          <div class="bar-comp-row">
+            <div class="bc-lbl">Solar Rad.</div>
+            <div class="bc-group">
+              <div class="bc-bar-row"><div class="bc-bar" id="bc-b4" style="width:0%;background:var(--score-red)"></div><div class="bc-num">840 kWh/m²/y baseline</div></div>
+              <div class="bc-bar-row"><div class="bc-bar" id="bc-e4" style="width:0%;background:var(--aec)"></div><div class="bc-num">380 kWh/m²/y + trees</div></div>
+            </div>
+          </div>
+          <div class="bar-comp-row">
+            <div class="bc-lbl">Wind speed</div>
+            <div class="bc-group">
+              <div class="bc-bar-row"><div class="bc-bar" id="bc-b5" style="width:0%;background:var(--score-yel)"></div><div class="bc-num">3.8 m/s baseline</div></div>
+              <div class="bc-bar-row"><div class="bc-bar" id="bc-e5" style="width:0%;background:var(--aec)"></div><div class="bc-num">2.9 m/s + trees</div></div>
+            </div>
+          </div>
+          <div class="bar-comp-row">
+            <div class="bc-lbl">Daylight</div>
+            <div class="bc-group">
+              <div class="bc-bar-row"><div class="bc-bar" id="bc-b6" style="width:0%;background:var(--score-dg)"></div><div class="bc-num">78% baseline</div></div>
+              <div class="bc-bar-row"><div class="bc-bar" id="bc-e6" style="width:0%;background:var(--score-lg)"></div><div class="bc-num">62% + trees</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="analysis-box vis" style="margin-top:0.5rem">
+          <strong>Key delta:</strong> Vegetation-enhanced scenario achieves a <strong>−7.7°C UTCI improvement</strong>, a <strong>−54% reduction in solar radiation load</strong>, and a <strong>−24% reduction in mean wind speed</strong> at pedestrian level, while keeping daylight availability above the 50% comfort threshold. Heat island intensity reduces from +4.2°C to an estimated <strong>+1.8°C</strong> above rural reference.
+        </div>
+        <div style="height:1rem"></div>
+      </div>
+
+      <!-- Tree placement tab -->
+      <div class="aec-panel hidden" id="aec-panel-trees" style="overflow-y:auto;padding:1rem 1.2rem">
+        <div class="sec-label" style="margin-top:0">Tree placement simulation script</div>
+        <div class="upload-placeholder" id="upload-zone" onclick="uploadClick()">
+          <div class="upload-icon">🌳</div>
+          <div class="upload-title">Upload your tree placement data</div>
+          <div class="upload-sub">Drop a CSV, GeoJSON or Grasshopper output here<br>to run the vegetation cooling simulation overlay</div>
+        </div>
+        <div class="sec-label">Expected data format</div>
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:0.9rem;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);line-height:1.8">
+          <span style="color:var(--aec)">latitude</span>, <span style="color:var(--aec)">longitude</span>, <span style="color:var(--aec)">species</span>, <span style="color:var(--aec)">crown_diameter_m</span>, <span style="color:var(--aec)">height_m</span>, <span style="color:var(--aec)">lai</span><br>
+          55.6830, 12.5690, Tilia cordata, 6.5, 12.0, 4.2<br>
+          55.6832, 12.5695, Acer platanoides, 7.0, 14.0, 3.8<br>
+          …
+        </div>
+        <div class="sec-label">Simulation parameters ready</div>
+        <div class="rq-row"><div class="rq-icon">🌿</div><div class="rq-label">MAESPA evapotranspiration model</div><div class="rq-val rq-good">Ready</div></div>
+        <div class="rq-row"><div class="rq-icon">☀️</div><div class="rq-label">Radiance raytracing (shading)</div><div class="rq-val rq-good">Ready</div></div>
+        <div class="rq-row"><div class="rq-icon">💨</div><div class="rq-label">PANDO wind-vegetation interaction</div><div class="rq-val rq-good">Ready</div></div>
+        <div class="rq-row"><div class="rq-icon">🌡</div><div class="rq-label">UTCI re-calculation with canopy</div><div class="rq-val rq-good">Ready</div></div>
+        <div style="height:1rem"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════
+   STATE
+══════════════════════════════════════════════════════ */
+let timers = [];
+let currentUser = null;
+let forcedUser = null;
+let walkMode = false;
+
+const USERS = {
+  stakeholder: {
+    label: '🏛 Stakeholder / Decision-maker',
+    accent: '#c8601a',
+    bg: 'rgba(200,96,26,0.1)',
+    border: 'rgba(200,96,26,0.3)',
+    keywords: ['leed','bd+c','sustainability','report','assessment','credit','municipal','policy','plan','urban plan','stakeholder','score','performance','environmental impact','master plan','district','site','public space','plaza'],
+    sims: ['run_thermal_comfort_UTCI() → Infrared.city API','run_solar_radiation() → Infrared.city API'],
+    steps: [
+      'Classifier agent — stakeholder profile confirmed',
+      'get_buildings() → OpenStreetMap geometry',
+      'get_weather_data() → EPW climate file + solar data',
+      'run_thermal_comfort_UTCI() → Infrared.city API',
+      'run_solar_radiation() → Infrared.city API',
+      'zone_statistics() → composite score normalisation 0→1',
+      'Synthesiser agent — KPI mapping &amp; recommendations',
+      'Routing to stakeholder environmental dashboard'
+    ]
+  },
+  citizen: {
+    label: '🚶 Private Citizen',
+    accent: '#2a6ea8',
+    bg: 'rgba(42,110,168,0.1)',
+    border: 'rgba(42,110,168,0.3)',
+    keywords: ['coffee','cafe','route','cycling','run','jog','walk','bike','shade','wind','outside','park','commute','find','go','where','best','today','now','cozy','sheltered','shaded','drink','sit','eat'],
+    sims: ['run_wind_speed() → Infrared.city API','run_shadow_analysis() → Infrared.city API'],
+    steps: [
+      'Classifier agent — citizen / mobility profile confirmed',
+      'get_buildings() → OpenStreetMap geometry + POI',
+      'get_weather_data() → real-time forecast + EPW',
+      'run_wind_speed() → Infrared.city API',
+      'run_shadow_analysis() → Infrared.city API',
+      'walkscore_compute() → route quality &amp; proximity scoring',
+      'Synthesiser agent — comfort &amp; mobility index',
+      'Routing to citizen mobility dashboard'
+    ]
+  },
+  aec: {
+    label: '📐 AEC Expert',
+    accent: '#2a8a5a',
+    bg: 'rgba(42,138,90,0.1)',
+    border: 'rgba(42,138,90,0.3)',
+    keywords: ['tree','vegetation','utci','svf','sky view','microclimate','simulation','envi','ladybug','grasshopper','heat island','designer','planner','architect','engineer','landscape','analysis','placement','cooling','evapotranspiration','biodiversity','canopy','radiance','pando','maespa','lim','rhino','design','urban morphology','biomass'],
+    sims: ['run_thermal_comfort_UTCI() → Infrared.city API','run_vegetation_cooling_ET() → Infrared.city API'],
+    steps: [
+      'Classifier agent — AEC expert / technical profile confirmed',
+      'get_buildings() → OpenStreetMap geometry + tree inventory',
+      'get_weather_data() → EPW + urban canyon parameters',
+      'run_thermal_comfort_UTCI() → Infrared.city API',
+      'run_vegetation_cooling_ET() → Infrared.city API',
+      'zone_statistics() → baseline vs. enhanced delta',
+      'Synthesiser agent — ecosystem services quantification',
+      'Routing to AEC expert vegetation dashboard'
+    ]
+  }
+};
+
+/* ══════════════════════════════════════════════════════
+   PROMPT DETECTION (LIVE)
+══════════════════════════════════════════════════════ */
+function scorePrompt(text) {
+  const t = text.toLowerCase();
+  const scores = {};
+  for (const [type, conf] of Object.entries(USERS)) {
+    scores[type] = conf.keywords.filter(kw => t.includes(kw)).length;
+  }
+  return scores;
+}
+
+document.getElementById('main-input').addEventListener('input', function() {
+  const val = this.value.trim();
+  const ind = document.getElementById('detect-indicator');
+  const lbl = document.getElementById('detect-label');
+  const shell = document.getElementById('prompt-shell');
+
+  if (!val) {
+    ind.className = 'detect-indicator';
+    lbl.textContent = 'Awaiting input…';
+    shell.className = 'prompt-shell';
+    return;
+  }
+
+  const scores = scorePrompt(val);
+  const sorted = Object.entries(scores).sort((a,b) => b[1]-a[1]);
+  const top = sorted[0], second = sorted[1];
+
+  // Ambiguous: top score = 0 or tied with second
+  if (top[1] === 0 || (top[1] === second[1] && top[1] > 0)) {
+    ind.className = 'detect-indicator ask';
+    lbl.textContent = 'Unclear — clarify profile';
+    shell.className = 'prompt-shell';
+    return;
+  }
+
+  const user = top[0];
+  const conf = USERS[user];
+  ind.className = 'detect-indicator ' + user;
+  lbl.textContent = conf.label;
+  shell.className = 'prompt-shell detecting-' + user;
+  document.getElementById('clarify-box').classList.remove('show');
+});
+
+document.getElementById('main-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') runAnalysis();
+});
+
+function fillPrompt(card) {
+  const txt = card.querySelector('.ep-text').textContent.trim();
+  document.getElementById('main-input').value = txt;
+  document.getElementById('main-input').dispatchEvent(new Event('input'));
+}
+
+function later(ms, fn) { const t = setTimeout(fn, ms); timers.push(t); return t; }
+function clearTimers() { timers.forEach(clearTimeout); timers = []; }
+
+/* ══════════════════════════════════════════════════════
+   RUN ANALYSIS
+══════════════════════════════════════════════════════ */
+function runAnalysis() {
+  const val = document.getElementById('main-input').value.trim();
+  if (!val) return;
+
+  if (forcedUser) {
+    currentUser = forcedUser; forcedUser = null;
+  } else {
+    const scores = scorePrompt(val);
+    const sorted = Object.entries(scores).sort((a,b) => b[1]-a[1]);
+    const top = sorted[0], second = sorted[1];
+
+    if (top[1] === 0 || (top[1] === second[1] && top[1] > 0)) {
+      // Ask for clarification
+      document.getElementById('clarify-box').classList.add('show');
+      return;
+    }
+    currentUser = top[0];
+  }
+
+  document.getElementById('clarify-box').classList.remove('show');
+  startStatus();
+}
+
+function forceUser(type) {
+  forcedUser = type;
+  runAnalysis();
+}
+
+function startStatus() {
+  const conf = USERS[currentUser];
+
+  // Update badge
+  const badge = document.getElementById('detect-badge');
+  badge.style.background = conf.bg;
+  badge.style.borderColor = conf.border;
+  badge.style.color = conf.accent;
+  badge.style.border = '1px solid ' + conf.border;
+  badge.style.padding = '5px 16px';
+  badge.style.borderRadius = '999px';
+  document.getElementById('badge-label').textContent = conf.label;
+  document.getElementById('progress-fill').style.background = conf.accent;
+
+  // Update step labels
+  const steps = document.querySelectorAll('.astep');
+  conf.steps.forEach((text, i) => {
+    if (steps[i]) steps[i].querySelector('.as-t').innerHTML = text;
+  });
+
+  showScreen('screen-status');
+
+  let delay = 300;
+  const total = steps.length;
+  steps.forEach((step, i) => {
+    const dur = [650, 520, 580, 920, 880, 680, 820, 480][i] || 650;
+    later(delay, () => {
+      step.classList.add('active');
+      step.style.borderColor = conf.border;
+      step.style.background = conf.bg;
+      step.querySelector('.astep-dot').style.background = conf.accent;
+      step.querySelector('.astep-dot').style.animation = 'dotPulse 1s ease infinite';
+      document.getElementById('progress-fill').style.width = ((i/total)*100) + '%';
+    });
+    later(delay + dur, () => {
+      step.classList.remove('active');
+      step.classList.add('done');
+      step.style.background = '';
+      step.style.borderColor = '';
+      step.querySelector('.astep-dot').style.animation = '';
+    });
+    delay += dur + 120;
+  });
+
+  later(delay + 200, () => {
+    document.getElementById('progress-fill').style.width = '100%';
+    later(400, showDashboard);
+  });
+}
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
+  ['dash-stakeholder','dash-citizen','dash-aec'].forEach(d => document.getElementById(d).classList.add('hidden'));
+  document.getElementById(id).classList.remove('hidden');
+}
+
+function showDashboard() {
+  document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
+  ['dash-stakeholder','dash-citizen','dash-aec'].forEach(d => document.getElementById(d).classList.add('hidden'));
+  const map = { stakeholder:'dash-stakeholder', citizen:'dash-citizen', aec:'dash-aec' };
+  document.getElementById(map[currentUser]).classList.remove('hidden');
+  if (currentUser === 'stakeholder') initSH();
+  else if (currentUser === 'citizen') initCT();
+  else initAEC();
+}
+
+function goHome() {
+  clearTimers();
+  document.querySelectorAll('.astep').forEach(s => { s.classList.remove('active','done'); s.style.background=''; s.style.borderColor=''; });
+  document.getElementById('progress-fill').style.width = '0%';
+  document.getElementById('main-input').value = '';
+  document.getElementById('detect-indicator').className = 'detect-indicator';
+  document.getElementById('detect-label').textContent = 'Awaiting input…';
+  document.getElementById('prompt-shell').className = 'prompt-shell';
+  document.getElementById('clarify-box').classList.remove('show');
+  forcedUser = null; walkMode = false;
+  showScreen('screen-landing');
+}
+
+/* ══════════════════════════════════════════════════════
+   MAP DRAWING
+══════════════════════════════════════════════════════ */
+const PALETTES = {
+  thermal:      ['#2c6fad','#5498d4','#92c6e8','#d4e8b0','#f5c842','#d45c20'],
+  wind:         ['#e8f4f0','#b8ddd4','#7abcb0','#3a9080','#1a6860','#0a4040'],
+  solar:        ['#f5f0e8','#f0d890','#e8b030','#d06010','#a03010','#701000'],
+  svf:          ['#e8f0f8','#a8c8e8','#6090c8','#3060a8','#184080','#082050'],
+  daylight:     ['#f0f8e8','#c0e0a0','#80c060','#409040','#1a6010','#083010'],
+  shadow:       ['#f8f4e8','#d8c890','#b89840','#907020','#604800','#302000'],
+  wind_comfort: ['#e8f4f0','#b0dcc8','#70c0a0','#30a070','#107050','#004030'],
+  trees:        ['#f0f8ec','#c4e8a0','#88cc58','#4aa020','#268010','#0c4800'],
+  route:        ['#e8f0f8','#a0c0e8','#5090d0','#1860b0','#083888','#041858'],
+};
+
+function drawMap(canvas, palKey, showTrees=false, showRoute=false) {
+  const w = canvas.offsetWidth||800, h = canvas.offsetHeight||600;
+  canvas.width = w; canvas.height = h;
+  const c = canvas.getContext('2d');
+
+  // Warm off-white base (light theme map)
+  c.fillStyle = '#e8e4d8'; c.fillRect(0,0,w,h);
+
+  // Water
+  const wg = c.createLinearGradient(0,h*0.62,0,h);
+  wg.addColorStop(0,'#b8d4e8'); wg.addColorStop(1,'#8ab8d8');
+  c.fillStyle = wg;
+  c.beginPath(); c.moveTo(0,h*0.66);
+  c.bezierCurveTo(w*0.25,h*0.61,w*0.58,h*0.69,w,h*0.64);
+  c.lineTo(w,h); c.lineTo(0,h); c.closePath(); c.fill();
+
+  // Roads
+  [[0,h*.33,w,h*.36,14],[0,h*.50,w,h*.52,10],[0,h*.60,w,h*.63,8],
+   [w*.18,0,w*.20,h,12],[w*.44,0,w*.46,h,10],[w*.68,0,w*.70,h,12],[w*.82,0,w*.84,h,8],
+   [0,h*.22,w*.65,h*.40,9],[w*.30,0,w*.52,h*.58,8]].forEach(([x1,y1,x2,y2,lw]) => {
+    c.strokeStyle = '#d0c8b0'; c.lineWidth = lw;
+    c.beginPath(); c.moveTo(x1,y1); c.lineTo(x2,y2); c.stroke();
+    c.strokeStyle = '#f0ece0'; c.lineWidth = lw-6;
+    c.beginPath(); c.moveTo(x1,y1); c.lineTo(x2,y2); c.stroke();
+  });
+
+  // Blocks/buildings
+  [[.05,.10,.12,.09],[.22,.08,.09,.11],[.50,.07,.14,.09],[.72,.10,.09,.13],[.87,.08,.09,.10],
+   [.08,.25,.08,.06],[.22,.24,.11,.08],[.36,.22,.06,.09],[.54,.22,.09,.07],[.72,.23,.12,.09],
+   [.86,.20,.09,.11],[.06,.42,.09,.07],[.28,.40,.12,.07],[.60,.38,.07,.09],[.74,.39,.10,.08],
+   [.10,.54,.07,.05],[.54,.48,.06,.08],[.34,.12,.07,.07],[.86,.38,.08,.07],[.47,.30,.05,.07]].forEach(([x,y,bw,bh]) => {
+    c.fillStyle = '#ccc8b8'; c.fillRect(x*w,y*h,bw*w,bh*h);
+    c.strokeStyle = '#b8b4a4'; c.lineWidth=0.5; c.strokeRect(x*w,y*h,bw*w,bh*h);
+  });
+
+  if (showTrees) {
+    [[.25,.18,.07],[.40,.15,.09],[.55,.30,.08],[.30,.42,.06],[.65,.20,.10],[.20,.35,.07],[.48,.40,.06],[.35,.28,.08],[.58,.12,.07]].forEach(([tx,ty,s]) => {
+      const r = s*Math.min(w,h)*0.5;
+      const g = c.createRadialGradient(tx*w,ty*h,0,tx*w,ty*h,r);
+      g.addColorStop(0,'rgba(60,160,60,0.55)'); g.addColorStop(1,'rgba(60,160,60,0)');
+      c.fillStyle = g; c.beginPath(); c.arc(tx*w,ty*h,r,0,Math.PI*2); c.fill();
+    });
+  }
+
+  if (showRoute) {
+    c.strokeStyle = '#2a6ea8'; c.lineWidth = 5; c.setLineDash([14,6]);
+    c.lineCap = 'round';
+    c.beginPath(); c.moveTo(w*.18,h*.10); c.lineTo(w*.18,h*.33); c.lineTo(w*.44,h*.33); c.lineTo(w*.46,h*.50); c.lineTo(w*.68,h*.50); c.stroke();
+    c.setLineDash([]); c.lineWidth = 1;
+    [[.18,.33],[.44,.33],[.46,.50],[.68,.50]].forEach(([px,py]) => {
+      c.beginPath(); c.arc(px*w,py*h,6,0,Math.PI*2);
+      c.fillStyle = '#2a6ea8'; c.fill();
+      c.beginPath(); c.arc(px*w,py*h,12,0,Math.PI*2);
+      c.strokeStyle = 'rgba(42,110,168,0.35)'; c.lineWidth=2; c.stroke();
+    });
+  }
+
+  // Pin
+  const px = w*.52, py = h*.46;
+  c.beginPath(); c.arc(px,py,10,0,Math.PI*2); c.fillStyle='rgba(50,50,50,0.15)'; c.fill();
+  c.beginPath(); c.arc(px,py,5,0,Math.PI*2); c.fillStyle='#1c1a14'; c.fill();
+  c.beginPath(); c.arc(px,py,15,0,Math.PI*2); c.strokeStyle='rgba(28,26,20,0.2)'; c.lineWidth=1.5; c.stroke();
+
+  // Location label
+  c.fillStyle = '#faf8f4'; c.strokeStyle = '#b8b4a4'; c.lineWidth=0.5;
+  const lw2 = 132, lh2 = 22;
+  c.beginPath(); c.roundRect(px+16,py-12,lw2,lh2,4); c.fill(); c.stroke();
+  c.fillStyle = '#3a3628'; c.font = '11px DM Mono, monospace';
+  c.fillText('Bryghuspladsen 8', px+22, py+4);
+}
+
+function drawRaster(canvas, palKey, alpha=0.45) {
+  const w = canvas.offsetWidth||800, h = canvas.offsetHeight||600;
+  canvas.width = w; canvas.height = h;
+  const c = canvas.getContext('2d');
+  const pal = PALETTES[palKey] || PALETTES.thermal;
+  const s = palKey.charCodeAt(0)*0.08;
+  for (let x=0;x<w;x+=8) for (let y=0;y<h;y+=8) {
+    const n = (Math.sin(x*.018+s)*Math.cos(y*.022)*.4+Math.sin(x*.006+y*.008)*.3+Math.cos(x*.013-y*.016+s)*.3)*.5+.5;
+    const ci = Math.min(Math.floor(n*pal.length),pal.length-1);
+    c.fillStyle = pal[ci]; c.globalAlpha = alpha*(0.5+n*.5);
+    c.fillRect(x,y,8,8);
+  }
+  c.globalAlpha = 1;
+}
+
+function drawStreetView(canvas, immersive=false) {
+  const w = canvas.offsetWidth||440, h = canvas.offsetHeight||280;
+  canvas.width = w; canvas.height = h;
+  const c = canvas.getContext('2d');
+  const vp = immersive ? 0.42 : 0.48;
+
+  // Sky
+  const sky = c.createLinearGradient(0,0,0,h*vp);
+  sky.addColorStop(0,'#6080b0'); sky.addColorStop(1,'#8aaccf');
+  c.fillStyle = sky; c.fillRect(0,0,w,h*vp);
+
+  // Distant haze
+  const haze = c.createLinearGradient(0,h*(vp-0.1),0,h*vp);
+  haze.addColorStop(0,'transparent'); haze.addColorStop(1,'rgba(200,210,220,0.4)');
+  c.fillStyle = haze; c.fillRect(0,h*(vp-0.12),w,h*0.12);
+
+  // Ground
+  const gnd = c.createLinearGradient(0,h*vp,0,h);
+  gnd.addColorStop(0,'#c8c0a8'); gnd.addColorStop(1,'#b0a890');
+  c.fillStyle = gnd; c.fillRect(0,h*vp,w,h*(1-vp));
+
+  // Road perspective
+  const cx = w/2, far = h*vp, near = h;
+  const rw_far = w*0.12, rw_near = w*0.5;
+  c.fillStyle = '#a09880';
+  c.beginPath(); c.moveTo(cx-rw_far,far); c.lineTo(cx+rw_far,far); c.lineTo(cx+rw_near,near); c.lineTo(cx-rw_near,near); c.closePath(); c.fill();
+
+  // Road markings
+  c.strokeStyle = 'rgba(255,255,255,0.5)'; c.lineWidth=2; c.setLineDash([16,12]);
+  c.beginPath(); c.moveTo(cx,far+4); c.lineTo(cx,near); c.stroke();
+  c.setLineDash([]);
+
+  // Buildings left side (perspective)
+  [[0,0.05,0.28,vp*1.15],[0.02,0.08,0.22,vp*1.1],[0.03,0.12,0.15,vp*1.08]].forEach(([sx,top,bw,bh],idx) => {
+    const g = c.createLinearGradient(sx*w,0,(sx+bw)*w,0);
+    g.addColorStop(0,'#d8d0bc'); g.addColorStop(1,'#c8c0aa');
+    c.fillStyle = g; c.fillRect(sx*w,top*h,bw*w,bh*h);
+    c.strokeStyle='rgba(150,140,120,0.4)'; c.lineWidth=0.5; c.strokeRect(sx*w,top*h,bw*w,bh*h);
+    // Windows
+    for (let wr=0;wr<4;wr++) for (let wc=0;wc<3;wc++) {
+      if ((wr+wc)%2===0) { c.fillStyle='rgba(140,160,200,0.3)'; c.fillRect((sx+0.02+wc*0.07)*w,(top+0.04+wr*0.08)*h,bw*w*0.12,bh*h*0.05); }
+    }
+  });
+
+  // Buildings right side
+  [[0.72,0.06,0.28,vp*1.1],[0.76,0.10,0.22,vp*1.05]].forEach(([sx,top,bw,bh]) => {
+    const g = c.createLinearGradient(sx*w,0,(sx+bw)*w,0);
+    g.addColorStop(0,'#c8c0aa'); g.addColorStop(1,'#d8d0bc');
+    c.fillStyle = g; c.fillRect(sx*w,top*h,bw*w,bh*h);
+    c.strokeStyle='rgba(150,140,120,0.4)'; c.lineWidth=0.5; c.strokeRect(sx*w,top*h,bw*w,bh*h);
+    for (let wr=0;wr<3;wr++) for (let wc=0;wc<3;wc++) {
+      if ((wr+wc)%2===0) { c.fillStyle='rgba(140,160,200,0.25)'; c.fillRect((sx+0.02+wc*0.07)*w,(top+0.04+wr*0.08)*h,bw*w*0.12,bh*h*0.05); }
+    }
+  });
+
+  // Trees left (OSM-style)
+  [0.26, 0.20, 0.31].forEach((tx, i) => {
+    const ty = vp + 0.04;
+    const tr = 0.055 - i*0.01;
+    const g2 = c.createRadialGradient(tx*w, ty*h, 0, tx*w, ty*h, tr*w);
+    g2.addColorStop(0,'rgba(60,140,60,0.9)'); g2.addColorStop(1,'rgba(60,140,60,0)');
+    c.fillStyle = g2; c.beginPath(); c.arc(tx*w, ty*h, tr*w, 0, Math.PI*2); c.fill();
+    // Trunk
+    c.fillStyle='rgba(80,60,40,0.6)'; c.fillRect(tx*w-2,ty*h,4,h*(1-vp)*0.2);
+  });
+
+  // Wind heatmap overlay on ground (the active analysis)
+  for (let xi=0;xi<w;xi+=12) {
+    const t = (Math.sin(xi*0.04)*0.5+0.5);
+    c.fillStyle = `rgba(42,110,168,${0.06+t*0.18})`; c.fillRect(xi,h*vp,12,h*(1-vp));
+  }
+
+  // Immersive crosshair
+  if (immersive) {
+    c.strokeStyle = 'rgba(255,255,255,0.5)'; c.lineWidth=1;
+    c.beginPath(); c.moveTo(w/2-12,h/2); c.lineTo(w/2+12,h/2); c.stroke();
+    c.beginPath(); c.moveTo(w/2,h/2-12); c.lineTo(w/2,h/2+12); c.stroke();
+    c.beginPath(); c.arc(w/2,h/2,18,0,Math.PI*2); c.strokeStyle='rgba(255,255,255,0.2)'; c.stroke();
+  }
+}
+
+function drawRadar(canvas) {
+  const w = canvas.width, h = canvas.height;
+  const c = canvas.getContext('2d');
+  c.clearRect(0,0,w,h);
+  c.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--surface') || '#faf8f4';
+  c.fillRect(0,0,w,h);
+
+  const cx = w/2, cy = h/2+8, R = Math.min(w,h)*0.36;
+  const axes = ['Biomass\nDensity','Biodiversity\nAvailability','CO₂\nSequestration','Climate\nRegulation','Air\nQuality','Human\nWell-being'];
+  const N = axes.length;
+  const baseline = [0.22, 0.18, 0.14, 0.20, 0.32, 0.25];
+  const enhanced = [0.70, 0.65, 0.78, 0.86, 0.72, 0.82];
+  const angle = i => (Math.PI*2/N)*i - Math.PI/2;
+
+  // Grid rings
+  [.25,.5,.75,1].forEach(r => {
+    c.beginPath();
+    for (let i=0;i<=N;i++) { const a=angle(i); i?c.lineTo(cx+R*r*Math.cos(a),cy+R*r*Math.sin(a)):c.moveTo(cx+R*r*Math.cos(a),cy+R*r*Math.sin(a)); }
+    c.closePath(); c.strokeStyle='rgba(60,55,40,0.1)'; c.lineWidth=0.5; c.stroke();
+    if (r===0.5) { c.fillStyle='rgba(60,55,40,0.06)'; c.fill(); }
+  });
+
+  // Axes
+  for (let i=0;i<N;i++) {
+    c.beginPath(); c.moveTo(cx,cy); c.lineTo(cx+R*Math.cos(angle(i)),cy+R*Math.sin(angle(i)));
+    c.strokeStyle='rgba(60,55,40,0.12)'; c.lineWidth=0.5; c.stroke();
+  }
+
+  // Baseline
+  c.beginPath();
+  baseline.forEach((v,i)=>{ const a=angle(i); i?c.lineTo(cx+R*v*Math.cos(a),cy+R*v*Math.sin(a)):c.moveTo(cx+R*v*Math.cos(a),cy+R*v*Math.sin(a)); });
+  c.closePath(); c.fillStyle='rgba(42,138,90,0.12)'; c.fill();
+  c.strokeStyle='rgba(42,138,90,0.35)'; c.lineWidth=1; c.stroke();
+
+  // Enhanced
+  c.beginPath();
+  enhanced.forEach((v,i)=>{ const a=angle(i); i?c.lineTo(cx+R*v*Math.cos(a),cy+R*v*Math.sin(a)):c.moveTo(cx+R*v*Math.cos(a),cy+R*v*Math.sin(a)); });
+  c.closePath(); c.fillStyle='rgba(42,138,90,0.20)'; c.fill();
+  c.strokeStyle='#2a8a5a'; c.lineWidth=1.8; c.stroke();
+
+  // Dots
+  enhanced.forEach((v,i)=>{ const a=angle(i); c.beginPath(); c.arc(cx+R*v*Math.cos(a),cy+R*v*Math.sin(a),3.5,0,Math.PI*2); c.fillStyle='#2a8a5a'; c.fill(); });
+
+  // Labels
+  axes.forEach((label,i) => {
+    const a=angle(i), lx=cx+(R+28)*Math.cos(a), ly=cy+(R+28)*Math.sin(a);
+    c.fillStyle='rgba(60,55,40,0.55)'; c.font='9px DM Mono,monospace'; c.textAlign='center';
+    label.split('\n').forEach((line,li,arr) => c.fillText(line, lx, ly+(li-arr.length/2+0.5)*11));
+  });
+}
+
+/* ══════════════════════════════════════════════════════
+   INIT FUNCTIONS
+══════════════════════════════════════════════════════ */
+function initSH() {
+  later(80, () => {
+    drawMap(document.getElementById('sh-mapCanvas'), 'thermal');
+    later(350, () => {
+      const rc = document.getElementById('sh-rasterCanvas');
+      drawRaster(rc, 'thermal');
+      rc.style.opacity = '0.45';
+    });
+  });
+  later(280, () => document.getElementById('sh-bar').style.width = '72%');
+  ['sh-k0','sh-k1','sh-k2','sh-k3','sh-k4','sh-k5','sh-k6','sh-k7'].forEach((id,i) => later(350+i*100, () => document.getElementById(id).classList.add('vis')));
+  ['sh-cs0','sh-cs1','sh-cs2'].forEach((id,i) => later(900+i*150, () => document.getElementById(id).classList.add('vis')));
+  ['sh-bm0','sh-bm1','sh-bm2','sh-bm3'].forEach((id,i) => later(1250+i*120, () => document.getElementById(id).classList.add('vis')));
+  ['sh-r0','sh-r1','sh-r2','sh-r3'].forEach((id,i) => later(1700+i*180, () => document.getElementById(id).classList.add('vis')));
+}
+
+function shSim(el, sim) {
+  document.querySelectorAll('.sim-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  const rc = document.getElementById('sh-rasterCanvas');
+  rc.style.opacity = '0';
+  later(300, () => { drawRaster(rc, sim); rc.style.opacity = '0.45'; });
+}
+
+function initCT() {
+  later(80, () => {
+    drawMap(document.getElementById('ct-mapCanvas'), 'route', false, true);
+    later(350, () => {
+      const rc = document.getElementById('ct-rasterCanvas');
+      drawRaster(rc, 'wind', 0.35);
+      rc.style.opacity = '0.35';
+    });
+  });
+  later(200, () => {
+    const sv = document.getElementById('sv-canvas');
+    drawStreetView(sv, false);
+  });
+  ['ct-ws0','ct-ws1','ct-ws2','ct-ws3'].forEach((id,i) => later(400+i*100, () => document.getElementById(id).classList.add('vis')));
+  ['ct-s0','ct-s1','ct-s2','ct-s3','ct-s4','ct-s5','ct-s6'].forEach((id,i) => later(700+i*90, () => document.getElementById(id).classList.add('vis')));
+}
+
+function toggleWalk() {
+  walkMode = !walkMode;
+  const btn = document.getElementById('sv-enter-btn');
+  const sv = document.getElementById('sv-canvas');
+  drawStreetView(sv, walkMode);
+  if (walkMode) {
+    btn.textContent = '⊙ Walking — move to improve comfort';
+    btn.classList.add('active');
+    sv.style.transition = 'transform 0.5s ease';
+    sv.style.transform = 'scale(1.03)';
+  } else {
+    btn.textContent = '👁 Enter space';
+    btn.classList.remove('active');
+    sv.style.transform = '';
+  }
+}
+
+function ctTab(el, panel) {
+  document.querySelectorAll('.ct-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  ['services','env','route'].forEach(p => {
+    document.getElementById('ct-panel-'+p).classList.toggle('hidden', p !== panel);
+  });
+}
+
+function initAEC() {
+  later(80, () => {
+    drawMap(document.getElementById('aec-mapCanvas'), 'trees', true);
+    later(350, () => {
+      const rc = document.getElementById('aec-rasterCanvas');
+      drawRaster(rc, 'trees', 0.4);
+      rc.style.opacity = '0.4';
+    });
+  });
+  later(400, () => drawRadar(document.getElementById('aec-radar')));
+  later(700, () => {
+    [['bc-b0',80],['bc-e0',55],['bc-b1',72],['bc-e1',46],['bc-b2',91],['bc-e2',63],
+     ['bc-b3',2],['bc-e3',60],['bc-b4',90],['bc-e4',42],['bc-b5',65],['bc-e5',48],
+     ['bc-b6',78],['bc-e6',62]].forEach(([id,w]) => {
+      const el = document.getElementById(id);
+      if (el) el.style.width = w+'%';
+    });
+  });
+  later(900, () => document.getElementById('aec-summary').classList.add('vis'));
+  ['aec-s0','aec-s1','aec-s2','aec-s3','aec-s4'].forEach((id,i) => later(1100+i*180, () => document.getElementById(id).classList.add('vis')));
+}
+
+function aecTab(el, panel) {
+  document.querySelectorAll('.aec-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  ['radar','comparison','trees'].forEach(p => {
+    document.getElementById('aec-panel-'+p).classList.toggle('hidden', p !== panel);
+  });
+}
+
+function uploadClick() {
+  const zone = document.getElementById('upload-zone');
+  zone.innerHTML = '<div class="upload-icon">✅</div><div class="upload-title">Data received — simulation queued</div><div class="upload-sub">Your tree coordinates will be processed<br>on the next Infrared.city API call</div>';
+}
+
+/* ══════════════════════════════════════════════════════
+   RESIZE
+══════════════════════════════════════════════════════ */
+window.addEventListener('resize', () => {
+  if (!document.getElementById('dash-stakeholder').classList.contains('hidden')) drawMap(document.getElementById('sh-mapCanvas'),'thermal');
+  if (!document.getElementById('dash-citizen').classList.contains('hidden')) {
+    drawMap(document.getElementById('ct-mapCanvas'),'route',false,true);
+    drawStreetView(document.getElementById('sv-canvas'),walkMode);
+  }
+  if (!document.getElementById('dash-aec').classList.contains('hidden')) {
+    drawMap(document.getElementById('aec-mapCanvas'),'trees',true);
+    drawRadar(document.getElementById('aec-radar'));
+  }
+});
+</script>
+</body>
+</html>

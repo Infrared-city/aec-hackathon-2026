@@ -267,9 +267,9 @@ def get_buildings(
 # ── Run directly ───────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    LAT   = 55.6729
-    LON   = 12.5784
-    LABEL = "bloxhub"
+    LAT   = 55.70318
+    LON   = 12.54799
+    LABEL = "norrebro"
 
     path = get_buildings(lat=LAT, lon=LON, label=LABEL, plot=True)
     print(f"Done: {path}")

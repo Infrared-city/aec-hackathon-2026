@@ -5,7 +5,9 @@ requests
 shapely
 osmnx
 python-dotenv
-
+scipy
+anthropic
+pyyaml
 # Copenhagen Urban Heat Dashboard
 # Core HoloViz stack
 panel>=1.3.0
